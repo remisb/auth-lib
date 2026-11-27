@@ -212,6 +212,7 @@ html { scroll-behavior: smooth; }
     <li><strong>One copy.</strong> The users, sessions, roles, permissions and security log that PPE-next2, PPE Crew and Baton each carry today become one library with its own tests.</li>
     <li><strong>Configured, not forked.</strong> What differs between clients and app sets (modules, built-in roles, languages, session limits) is configuration, checked at start-up and in CI.</li>
     <li><strong>Smaller apps.</strong> Auth leaves PPE's <code>cmd/api</code> and four packages, and stops needing a migration for every new permission.</li>
+    <li><strong>A small surface.</strong> Everything lives in <code>internal/</code> except the few names an app must touch; the exported API is checked in and reviewed (<a href="#api">Library and API</a>).</li>
     <li><strong>A path to auth-proto.</strong> The same services later run behind auth-proto's OAuth layer, with the database levels as stepping stones.</li>
   </ul>
   <div class="decisions five">
@@ -278,19 +279,19 @@ flowchart LR
 <section id="modules">
   <h2><span class="n">04</span>Modules and permission keys</h2>
   <div class="file"><div class="name">a module, declared by the app</div>
-<pre><code><span class="k">var</span> Projects = access.Module{
+<pre><code><span class="k">var</span> Projects = authlib.Module{
 	Key:   <span class="s">"projects"</span>,
 	Label: <span class="s">"modules.projects"</span>, <span class="c">// the app's dictionary key</span>
-	Permissions: []access.Permission{
+	Permissions: []authlib.Permission{
 		{Key: <span class="s">"projects.manage"</span>, Group: <span class="s">"projects"</span>},
 		{Key: <span class="s">"projects.assign"</span>, Group: <span class="s">"projects"</span>},
-		{Key: <span class="s">"projects.override"</span>, Group: <span class="s">"projects"</span>, Requires: []access.Key{<span class="s">"projects.assign"</span>}},
+		{Key: <span class="s">"projects.override"</span>, Group: <span class="s">"projects"</span>, Requires: []authlib.Key{<span class="s">"projects.assign"</span>}},
 	},
-	Apps: []access.AppEntry{{Slug: <span class="s">"crew"</span>, AnyOf: []access.Key{<span class="s">"projects.manage"</span>, <span class="s">"projects.assign"</span>}}},
+	Apps: []authlib.AppEntry{{Slug: <span class="s">"crew"</span>, AnyOf: []authlib.Key{<span class="s">"projects.manage"</span>, <span class="s">"projects.assign"</span>}}},
 }
 
 <span class="c">// Typed keys for routes: rt.restricted("POST /api/v1/assignments", h.assign, perm.ProjectsAssign)</span>
-<span class="k">const</span> ProjectsAssign access.Key = <span class="s">"projects.assign"</span></code></pre></div>
+<span class="k">const</span> ProjectsAssign authlib.Key = <span class="s">"projects.assign"</span></code></pre></div>
   <h3>Rules</h3>
   <ul>
     <li>A key is unique in its app set. The start-up check refuses a duplicate, naming both modules.</li>
@@ -387,7 +388,7 @@ flowchart LR
       <h3>Apps a user may open</h3>
       <ul>
         <li>A module lists the apps it serves and their entry permissions (<code>AnyOf</code>).</li>
-        <li><code>access.AppsFor(user)</code> answers which apps the user may open, so the launcher's rule and a future app switcher share one source.</li>
+        <li><code>auth.AppsFor(principal)</code> answers which apps the user may open, so the launcher's rule and a future app switcher share one source.</li>
       </ul>
     </div>
   </div>
@@ -395,55 +396,91 @@ flowchart LR
 
 <section id="api">
   <h2><span class="n">07</span>Library and API</h2>
+  <p><strong>Everything starts in <code>internal/</code>.</strong> Go refuses any import of an <code>internal</code> package from outside the module, so apps can't depend on the library's services, stores, tokens or handlers. Each exported name is a promise that must be kept across versions, so the library exports only what an app has to touch: declaring its permissions, wiring the library in, registering its routes, and asking who the caller is and what they may do.</p>
 <pre class="tree"><code>auth-lib/                       <span class="c">module github.com/remisb/auth-lib</span>
-├── access.go                   <span class="c">New(Config) → *Access; Catalogue, AppsFor, Check</span>
-├── module.go  profile.go  check.go
-├── user/                       <span class="c">accounts, passwords, language, deactivate, delete (from PPE)</span>
-├── session/                    <span class="c">sign-ins, refresh token scheme, 2-minute grace, limits, end reasons, reauth</span>
-├── rbac/                       <span class="c">roles, built-in sync, add-on, guarded, containment</span>
-├── seclog/                     <span class="c">auth_events, sign-in limits, devices, access review</span>
-├── store/postgres/             <span class="c">pgx; v2 adds store/sqlite/ and contract tests on both</span>
-├── migrations/postgres/        <span class="c">embedded; own version table auth.schema_migrations</span>
-├── tokens/                     <span class="c">HS256 access tokens as today; EdDSA later for auth-proto</span>
-├── httpauth/                   <span class="c">/auth/* sign-in routes, users, roles, security routes, registered through the app's router</span>
-├── muxauth/                    <span class="c">muxstack Authenticator and Authorizer</span>
-└── authtest/                   <span class="c">fakes, in-memory store, fixtures, Reset for Postgres tests</span></code></pre>
+├── authlib.go                  <span class="c">package authlib: New, Config, *Auth and its methods</span>
+├── module.go                   <span class="c">Module, Permission, Key, AppEntry: what an app declares</span>
+├── principal.go                <span class="c">Principal (opaque), PrincipalFrom</span>
+├── store.go                    <span class="c">Store (sealed), Postgres(pool, PostgresOptions); v2 SQLite(db, …)</span>
+├── errors.go                   <span class="c">ErrNotFound, ErrForbidden, ErrInvalid, ErrProfile, FieldError</span>
+├── example_test.go             <span class="c">an example for every exported name</span>
+├── api.txt                     <span class="c">the exported API, checked in; CI compares it</span>
+├── muxauth/                    <span class="c">one function: the muxstack Authenticator for an *Auth</span>
+├── authtest/                   <span class="c">test helpers for apps: Reset, fake *Auth, Principal(…), SignedIn(…)</span>
+└── internal/
+    ├── user/  session/  rbac/  seclog/        <span class="c">the services moved from PPE</span>
+    ├── profile/  catalogue/                   <span class="c">profile parsing, the start-up check, built-in sync</span>
+    ├── token/  password/                      <span class="c">access tokens, refresh token scheme, bcrypt</span>
+    ├── httpapi/                               <span class="c">every handler: /auth/*, users, roles, security</span>
+    ├── store/postgres/  store/sqlite/ (v2)    <span class="c">repositories; contract tests on both</span>
+    └── migrations/postgres/  migrations/sqlite/ (v2)</code></pre>
+
+  <h3>The whole public surface</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Package</th><th>Exported</th><th>Why the app needs it</th></tr></thead>
+    <tbody>
+      <tr><td class="wrap"><code>authlib</code>: declaring</td><td class="wrap"><code>Module</code>, <code>Permission</code>, <code>Key</code>, <code>AppEntry</code></td><td>Each app declares its permissions in code; routes use typed <code>Key</code> constants</td></tr>
+      <tr><td class="wrap"><code>authlib</code>: wiring</td><td class="wrap"><code>New</code>, <code>Config</code>, <code>Store</code>, <code>Postgres</code>, <code>PostgresOptions</code>, <code>Event</code>, <code>Request</code>, <code>CheckProfile</code></td><td>Start the library with the profile, modules, database and the app's ports; check a profile in CI</td></tr>
+      <tr><td class="wrap"><code>*authlib.Auth</code></td><td class="wrap"><code>Routes(Registrar)</code>, <code>Middleware</code>, <code>Migrate</code>, <code>Ready</code>, <code>RunJobs</code>, <code>SeedAdmin</code>, <code>User</code>, <code>AppsFor</code>, <code>Catalogue</code></td><td>Register the library's routes through the app's router, run its migrations and upkeep, seed the first admin, read a user's public details</td></tr>
+      <tr><td class="wrap"><code>authlib</code>: the caller</td><td class="wrap"><code>Principal</code> (methods <code>UserID</code>, <code>SessionID</code>, <code>Can</code>, <code>Language</code>, <code>SignedInWithin</code>), <code>PrincipalFrom</code>, <code>Registrar</code></td><td>Who is calling and what they may do, inside the app's handlers</td></tr>
+      <tr><td class="wrap"><code>authlib</code>: results</td><td class="wrap"><code>UserInfo</code> (<code>ID</code>, <code>Email</code>, <code>Name</code>, <code>Language</code>, <code>Active</code>), <code>PermissionInfo</code>, <code>ErrNotFound</code>, <code>ErrForbidden</code>, <code>ErrInvalid</code>, <code>ErrProfile</code>, <code>FieldError</code></td><td>Values returned to the app, and errors it can tell apart with <code>errors.Is</code> and <code>errors.As</code></td></tr>
+      <tr><td><code>muxauth</code></td><td><code>Authenticator</code></td><td>Kept apart so the root package doesn't depend on muxstack</td></tr>
+      <tr><td><code>authtest</code></td><td class="wrap"><code>Reset</code>, <code>New</code>, <code>Principal</code>, <code>SignedIn</code></td><td>Apps' tests: empty the tables, build a fake, make a caller with given permissions. Allowed to use <code>internal/</code> because it lives in the same module</td></tr>
+    </tbody>
+  </table></div>
+  <p class="cap">About 30 names in the root package. Not exported: users' password hashes, role ids and role rows, sessions, refresh tokens, security events, the store's interface and every handler. Apps that need those today get them through the library's routes, not its types.</p>
+
   <div class="file"><div class="name">PPE-next2: cmd/api wiring</div>
-<pre><code>acc, err := access.New(ctx, access.Config{
-	Profile:  cfg.AccessProfile,                                        <span class="c">// API_ACCESS_PROFILE</span>
-	Modules:  []access.Module{perm.Administration, perm.Launcher, perm.Workwear, perm.Personnel, perm.Vault, perm.Dashboards,
-		crewperm.People, crewperm.Competence, crewperm.Projects},
-	Store:    postgres.New(pool),                                       <span class="c">// schema "auth" in PPE's database</span>
-	Recorder: auditRecorder{},                                          <span class="c">// audit.Insert in the library's transaction</span>
-	Request:  requestInfo,                                              <span class="c">// request id, sign-in id and app slug from ctx</span>
-	Hooks:    access.Hooks{BeforeDelete: refuseIfEmployeeHolds},
-	Secret:   cfg.JWTSecret,
-	Clock:    clock,
+<pre><code>auth, err := authlib.New(ctx, authlib.Config{
+	Profile: profile,                                    <span class="c">// the bytes of API_ACCESS_PROFILE</span>
+	Modules: []authlib.Module{perm.Administration, perm.Launcher, perm.Workwear, perm.Personnel,
+		perm.Vault, perm.Dashboards, crewperm.People, crewperm.Competence, crewperm.Projects},
+	Store: authlib.Postgres(pool, authlib.PostgresOptions{
+		Schema:       <span class="s">"auth"</span>,
+		Record:       recordAudit,           <span class="c">// func(ctx, pgx.Tx, []authlib.Event) error: audit.Insert in the same transaction</span>
+		BeforeDelete: refuseIfEmployeeHolds, <span class="c">// func(ctx, pgx.Tx, uuid.UUID) error: may veto</span>
+	}),
+	Request: requestInfo,                                <span class="c">// func(ctx) authlib.Request: request id, sign-in, app slug</span>
+	Secret:  cfg.JWTSecret,
+	Now:     clock.Now,
 })
 <span class="k">if</span> err != <span class="k">nil</span> {
-	log.Fatal(err) <span class="c">// the profile's problems, named</span>
+	log.Fatal(err) <span class="c">// ErrProfile names each problem</span>
 }
-httpauth.Register(rt, acc)                                          <span class="c">// rt.public / rt.authenticated / rt.restricted: TestRoutePolicy still pins them</span>
-rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, perm.OrdersDelete) <span class="c">// unchanged but for the import</span></code></pre></div>
+auth.Routes(rt) <span class="c">// rt implements Registrar: Public, Authenticated, Restricted; TestRoutePolicy still pins every route</span>
+rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, perm.OrdersDelete)
+
+<span class="k">func</span> (h *orderHandler) delete(w http.ResponseWriter, r *http.Request) {
+	p, _ := authlib.PrincipalFrom(r.Context())
+	err := h.orders.Delete(r.Context(), r.PathValue(<span class="s">"id"</span>), p.UserID())
+	…
+}</code></pre></div>
+
   <div class="grid2">
     <div class="card">
-      <h3>Ports the app supplies</h3>
+      <h3>Rules for the public surface</h3>
       <ul>
-        <li><code>Recorder</code>: called inside the library's transaction with its events (<code>user.*</code>, <code>role.*</code>), so PPE's sealed audit trail keeps recording them atomically. Names stay as they are.</li>
-        <li><code>Request</code>: the request's id, sign-in and app slug, for the security log.</li>
-        <li><code>Hooks</code>: <code>BeforeDelete</code>, <code>BeforeDeactivate</code>, which may veto in the same transaction.</li>
-        <li><code>Mailer</code> (v2): invitations and resets.</li>
+        <li>New code goes into <code>internal/</code>. Moving a name out needs a reason in the pull request, and an app that can't work without it.</li>
+        <li>No exported signature mentions an <code>internal</code> type. A test walks the exported API with <code>go/types</code> and fails if one does.</li>
+        <li>Values handed out are copies: slices and maps are cloned, and <code>Principal</code> and <code>UserInfo</code> have no pointers into the library's state.</li>
+        <li><code>Principal</code>'s fields are unexported; it is read through methods, and only the library and <code>authtest</code> make one.</li>
+        <li><code>Store</code> is sealed (an unexported method), so apps choose a store but can't implement or inspect one.</li>
+        <li>Interfaces the app implements stay small: <code>Registrar</code> has three methods; the other ports are single functions.</li>
+        <li>Errors are the fixed set above. Messages never carry SQL, table names, hashes or tokens.</li>
+        <li>No global state and no <code>init</code>; time comes from <code>Config.Now</code>.</li>
       </ul>
     </div>
     <div class="card">
-      <h3>Boundaries</h3>
+      <h3>Contracts outside Go</h3>
       <ul>
-        <li>The library imports no app package. A test in the library fails on any <code>remisb/ppe-*</code> or <code>baton</code> import.</li>
-        <li>The library's services never import <code>net/http</code>; only <code>httpauth</code> and <code>muxauth</code> do.</li>
-        <li>HTTP shapes stay PPE's (<code>{"error": …}</code>, the same JSON), so the apps' clients don't change in v1.</li>
+        <li><strong>HTTP</strong>: the routes' paths and JSON are public, since the apps' frontends call them. They stay PPE's in v1, are listed in <code>docs/http.md</code>, and are pinned by golden JSON tests.</li>
+        <li><strong>Database</strong>: the tables are the library's own. Apps may reference <code>auth.users(id)</code> in foreign keys and read the view <code>auth.directory</code> (id, email, name, language, active), and nothing else. Changing either is a breaking change.</li>
+        <li><strong>Profile</strong>: the file format is versioned (<code>version: 1</code>); an unknown field is refused.</li>
+        <li><strong>Audit events</strong>: their names (<code>user.*</code>, <code>role.*</code>) and snapshots are public, as apps keep them in their trails.</li>
       </ul>
     </div>
   </div>
+  <div class="note"><strong>Keeping it small.</strong> <code>api.txt</code> holds the exported API as <code>go doc -all</code> prints it. CI fails when the API changes and <code>api.txt</code> doesn't, so every change to the surface shows up in review. Before a release tag, <code>apidiff</code> against the previous tag decides the version: a breaking change needs a major version from v1 on. The library imports no app package; a test fails on any <code>remisb/ppe-*</code> or <code>baton</code> import.</div>
 </section>
 
 <section id="data">
@@ -461,8 +498,9 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
     <li><strong>Migrations</strong>: the library embeds its own, with its own version table <code>auth.schema_migrations</code>, run by <code>api -migrate-auth</code> before the app's. PPE's <code>make migrate</code>, <code>deploy/migrate.sh</code> and <code>/ready</code> call it.</li>
     <li><strong>Moving into <code>auth</code></strong>: the first library migration is a baseline. When <code>public.users</code> exists, it moves the six tables with <code>ALTER TABLE … SET SCHEMA</code>, which keeps every foreign key, index, trigger and row. On an empty database it creates them.</li>
     <li><strong>Grants</strong>: the library ships <code>grants.sql</code> for its schema, taking the app's role name (<code>ppe_app</code>) as a parameter. Append-only <code>auth_events</code> and its purge function move with it.</li>
+    <li><strong>Public objects</strong>: apps may reference <code>auth.users(id)</code> in foreign keys and read the view <code>auth.directory</code>; every other table, column and function is the library's own and may change in any release. PPE's 15 Go files that join <code>users</code> for names read <code>auth.directory</code> instead.</li>
     <li><strong>Tests</strong>: <code>authtest.Reset(tx)</code> empties the library's tables and syncs built-ins again, replacing <code>TRUNCATE users CASCADE</code> plus <code>role.EnsureBuiltins</code>.</li>
-    <li><strong>SQLite</strong> (v2, for Baton): <code>store/sqlite</code> on <code>modernc.org/sqlite</code>, ported from Baton's approach (WAL, <code>BEGIN IMMEDIATE</code> for <code>FOR UPDATE</code> and the advisory lock, UTC text times, paired migration folders), with one contract test run on both stores. It applies at L2, or to an app that is entirely on SQLite.</li>
+    <li><strong>SQLite</strong> (v2, for Baton): <code>internal/store/sqlite</code>, chosen with <code>authlib.SQLite(db, …)</code>, on <code>modernc.org/sqlite</code>, ported from Baton's approach (WAL, <code>BEGIN IMMEDIATE</code> for <code>FOR UPDATE</code> and the advisory lock, UTC text times, paired migration folders), with one contract test run on both stores. It applies at L2, or to an app that is entirely on SQLite.</li>
   </ul>
 </section>
 
@@ -473,7 +511,7 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
       <h3>Out of PPE-next2</h3>
       <ul>
         <li><code>internal/domain/{user,session,role}</code> and <code>internal/security</code> into the library.</li>
-        <li><code>cmd/api/auth.go</code>, <code>auth-cookie.go</code>, <code>auth-routes.go</code>, <code>user-routes.go</code>, <code>role-routes.go</code>, <code>security-routes.go</code> into <code>httpauth</code>, with their tests.</li>
+        <li><code>cmd/api/auth.go</code>, <code>auth-cookie.go</code>, <code>auth-routes.go</code>, <code>user-routes.go</code>, <code>role-routes.go</code>, <code>security-routes.go</code> into <code>internal/httpapi</code>, with their tests; PPE registers them with <code>auth.Routes(rt)</code>.</li>
         <li><code>role/permission.go</code> splits: the engine into the library; PPE's keys, groups and requirements into a new <code>internal/perm</code> with its modules. The 64 <code>role.*</code> names become <code>perm.*</code>: mechanical.</li>
         <li><code>role/builtin.go</code> into <code>deploy/clients/gavort/access.yaml</code>.</li>
         <li>New permissions stop needing a migration.</li>
@@ -516,11 +554,11 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
     <thead><tr><th>Phase</th><th>Scope</th><th>Done when</th></tr></thead>
     <tbody>
       <tr><td>P0 Repository</td><td><code>remis-libs/auth-lib</code>: module, CI with Postgres, CLAUDE.md, an ADR on modules and client profiles, the profile format and its check</td><td>CI green; the check refuses a set of bad profiles, each with its message</td></tr>
-      <tr><td>P1 Extract as-is</td><td>The four packages and the <code>cmd/api</code> auth files moved with their tests; ports for <code>Recorder</code>, <code>Request</code>, <code>Hooks</code>; the store on PPE's existing tables (L0). PPE switches with no change in behaviour.</td><td>PPE's Go tests, <code>TestRoutePolicy</code>, <code>TestSeededRolesKeepPolicy</code> and e2e pass unchanged; the old packages are deleted</td></tr>
+      <tr><td>P1 Extract as-is</td><td>The four packages and the <code>cmd/api</code> auth files moved into <code>internal/</code> with their tests; the public surface (<code>api.txt</code>) with <code>Record</code>, <code>BeforeDelete</code> and <code>Request</code>; the store on PPE's existing tables (L0). PPE switches with no change in behaviour.</td><td>PPE's Go tests, <code>TestRoutePolicy</code>, <code>TestSeededRolesKeepPolicy</code> and e2e pass unchanged; the old packages are deleted</td></tr>
       <tr><td>P2 Modules and profile</td><td>PPE's keys into <code>internal/perm</code> modules; <code>role.*</code> → <code>perm.*</code>; production's current built-in sets read and written into <code>gavort/access.yaml</code>; built-ins synced and locked; <code>-check-access</code> in CI; session settings read from the profile</td><td>A golden test shows the profile yields exactly production's role → permission sets; a new permission ships with no migration</td></tr>
       <tr><td>P3 Own schema (L1)</td><td>Embedded migrations with the baseline move to <code>auth</code>; grants; <code>-migrate-auth</code> in <code>make migrate</code>, <code>deploy/migrate.sh</code> and <code>/ready</code>; <code>authtest.Reset</code></td><td>Up, down, up in CI; a restored production backup migrates with every foreign key intact</td></tr>
       <tr><td>P4 Crew</td><td>(a) Crew drops <code>iam</code> for the library with its own profile; (b) when its contexts move into PPE's binary (ADR 0001), its modules and roles join Gavort's profile and its role assignments are imported</td><td>(a) Crew's tests pass with <code>iam</code> deleted; (b) a Crew planner signs in to PPE's binary with Crew's permissions</td></tr>
-      <tr><td>P5 v2 for Baton</td><td>SQLite store and contract tests, roles per resource scope (Baton's projects), API tokens and invitations (from Baton), the <code>Mailer</code> port; a <code>remisb</code> profile</td><td>The contract test passes on both stores; Baton's identity packages are deleted</td></tr>
+      <tr><td>P5 v2 for Baton</td><td>SQLite store and contract tests, roles per resource scope (Baton's projects), API tokens and invitations (from Baton), a <code>Mailer</code> option; a <code>remisb</code> profile</td><td>The contract test passes on both stores; Baton's identity packages are deleted</td></tr>
       <tr><td>P6 Later</td><td>L2 (separate database with the mirror and change feed); token format per the guidelines (server sessions) or EdDSA; auth-proto on top</td><td>Its own plan, in auth-proto</td></tr>
     </tbody>
   </table></div>
@@ -537,12 +575,15 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
         <li>Profile checks: table tests of good and bad profiles and modules.</li>
         <li>Built-in sync: adds, removes, keeps dormant, writes one event per change, is a no-op the second time.</li>
         <li>Migrations: the baseline on an empty database and on a copy of PPE's tables.</li>
-        <li>Import boundaries: no app package, no <code>net/http</code> in services.</li>
+        <li>Import boundaries: no app package; no <code>net/http</code> outside <code>internal/httpapi</code>, the root package's <code>Middleware</code> and <code>muxauth</code>.</li>
+        <li>The public surface: <code>api.txt</code> matches <code>go doc -all</code>; no exported signature names an <code>internal</code> type; every exported name has an example.</li>
+        <li>HTTP contract: golden JSON for every route's answers, so a change to a shape is seen.</li>
       </ul>
     </div>
     <div class="card">
       <h3>In the apps</h3>
       <ul>
+        <li>Apps' handler tests make callers with <code>authtest.Principal(userID, keys…)</code> instead of signing tokens.</li>
         <li>PPE keeps <code>TestRoutePolicy</code> and <code>TestSeededRolesKeepPolicy</code>, now fed by the profile.</li>
         <li>A golden test: <code>gavort/access.yaml</code> gives the role → permission sets recorded from production.</li>
         <li><code>permissions.ts</code> against the catalogue, as today.</li>
@@ -559,7 +600,7 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
     <tbody>
       <tr><td>A bad profile stops the API at deploy</td><td><code>-check-access</code> in CI on the same binary; <code>prod-up</code> waits for <code>/ready</code> before replacing Caddy, so the old API keeps serving</td></tr>
       <tr><td>Locking built-ins drops an edit made in production</td><td>P2 copies production's sets first and the golden test proves equality; a profile may still mark a built-in <code>seeded</code> (created once, then editable) for a client who wants that</td></tr>
-      <tr><td>The library grows to fit three apps' differences</td><td>A small core; API tokens, invitations and resource scopes as optional packages in v2; an app's quirks stay in the app through <code>Hooks</code></td></tr>
+      <tr><td>The library grows to fit three apps' differences</td><td>A small core; API tokens, invitations and resource scopes as optional packages in v2; an app's quirks stay in the app through <code>BeforeDelete</code> and similar single-function options; new exports need a reason, and <code>api.txt</code> shows every one in review</td></tr>
       <tr><td>Changes spanning library and app need two releases</td><td><code>go.work</code> locally; tagged versions; the library's CI runs PPE's auth tests against the change before tagging</td></tr>
       <tr><td>Another private module in the image builds</td><td>The same <code>.github-token</code> secret as dbbackup and pdf-mini, with read access added; or make the repository public, as it holds no secrets</td></tr>
       <tr><td>The schema move on a live database</td><td>One transaction, rehearsed on a restored backup (<code>make prod-drill</code>); the down migration moves the tables back</td></tr>
