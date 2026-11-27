@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>auth-lib Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: sticky table of contents on the left, one reading column (~72ch) on the right; stacks to one column on phones. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #16202c;
+  --muted: #586474;
+  --line: #d8dee5;
+  --accent: #0d6b67;
+  --accent-soft: #e2f1ef;
+  --key: #9a6512;
+  --key-soft: #f6ecd9;
+  --code-bg: #eef1f4;
+  --danger: #a33a2e;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1318; --surface: #151c24; --ink: #e3e8ee; --muted: #94a1b0; --line: #29333e;
+    --accent: #4fc1b8; --accent-soft: #15302e; --key: #e2aa4f; --key-soft: #33281a;
+    --code-bg: #1a222b; --danger: #ef8a7d; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1318; --surface: #151c24; --ink: #e3e8ee; --muted: #94a1b0; --line: #29333e;
+  --accent: #4fc1b8; --accent-soft: #15302e; --key: #e2aa4f; --key-soft: #33281a;
+  --code-bg: #1a222b; --danger: #ef8a7d; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  padding-inline: 16px; padding-block: 0 64px;
+}
+.page {
+  max-width: 1180px; margin: 0 auto;
+  display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px;
+}
+@media (max-width: 900px) { .page { grid-template-columns: minmax(0, 1fr); gap: 0; } nav.toc { display: none; } }
+
+nav.toc {
+  position: sticky; top: env(safe-area-inset-top, 0px); align-self: start;
+  padding-block: 40px; font-size: 14px; max-height: 100vh; overflow-y: auto;
+}
+nav.toc .brand { font-family: var(--font-display); font-weight: 700; font-size: 18px; margin-bottom: 18px; }
+nav.toc .brand span { color: var(--accent); }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: s; }
+nav.toc li { counter-increment: s; }
+nav.toc a {
+  display: grid; grid-template-columns: 26px 1fr; color: var(--muted); text-decoration: none;
+  padding: 4px 8px; border-radius: 6px;
+}
+nav.toc a::before { content: counter(s, decimal-leading-zero); font-family: var(--font-mono); font-size: 11px; padding-top: 3px; }
+nav.toc a:hover { color: var(--ink); background: var(--surface); }
+
+main { min-width: 0; padding-block: 40px 0; }
+header.doc { display: grid; gap: 14px; padding-bottom: 28px; border-bottom: 1px solid var(--line); }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(32px, 5vw, 46px); font-weight: 700; letter-spacing: -0.01em; }
+h1 em { font-style: normal; color: var(--accent); }
+h2 { font-size: 28px; font-weight: 700; }
+h3 { font-size: 19px; font-weight: 500; margin-top: 8px; }
+.lede { font-size: 18px; color: var(--muted); max-width: 68ch; margin: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--muted); font-family: var(--font-mono); }
+
+section { padding-top: 48px; display: grid; gap: 16px; scroll-margin-top: 16px; }
+section > h2 { display: flex; gap: 14px; align-items: baseline; }
+section > h2 .n { font-family: var(--font-mono); font-size: 14px; font-weight: 400; color: var(--key); }
+p, li { max-width: 72ch; }
+p { margin: 0; }
+ul, ol { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+a { color: var(--accent); }
+strong { font-weight: 600; }
+code { font-family: var(--font-mono); font-size: .88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+
+.decisions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1180px) { .decisions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .decisions { grid-template-columns: minmax(0, 1fr); } }
+.decision { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.decision .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.decision .v { font-weight: 600; }
+.decision .d { font-size: 14px; color: var(--muted); }
+
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--font-mono); font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--bg); }
+td code { white-space: nowrap; }
+td.wrap code { white-space: normal; }
+
+pre {
+  margin: 0; background: var(--code-bg); border-radius: 10px; padding: 14px 16px;
+  overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.55; color: var(--ink);
+}
+pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+pre .c { color: var(--muted); font-style: italic; }
+pre .k { color: var(--accent); }
+pre .s { color: var(--key); }
+.file { display: grid; gap: 0; }
+.file .name {
+  font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  background: var(--surface); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 10px 10px 0 0; padding: 6px 14px;
+}
+.file pre { border-radius: 0 0 10px 10px; border: 1px solid var(--line); border-top: 0; }
+
+.pill { display: inline-block; font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid var(--line); color: var(--muted); }
+.pill.public { color: var(--muted); }
+.pill.cookie { color: var(--key); border-color: var(--key); background: var(--key-soft); }
+.pill.user { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.pill.key { color: var(--ink); background: var(--code-bg); }
+.pill.console { color: var(--danger); border-color: var(--danger); }
+
+.note { border-left: 3px solid var(--key); background: var(--key-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 15px; }
+.note strong { color: var(--key); }
+
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }
+.figure figcaption, .cap { font-size: 13px; color: var(--muted); margin-top: 8px; }
+figure { margin: 0; }
+.dia { width: 100%; min-width: 760px; height: auto; display: block; font-family: var(--font-body); }
+.dia .zone { fill: var(--bg); stroke: var(--line); stroke-dasharray: 5 4; }
+.dia .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.dia .box.hot { stroke: var(--accent); stroke-width: 1.6; }
+.dia .box.store { fill: var(--code-bg); }
+.dia .t { fill: var(--ink); font-size: 13.5px; font-weight: 600; }
+.dia .s { fill: var(--muted); font-size: 11.5px; }
+.dia .m { fill: var(--ink); font-size: 11.5px; font-family: var(--font-mono); }
+.dia .zl { fill: var(--muted); font-size: 11px; font-family: var(--font-mono); letter-spacing: .06em; }
+.dia .edge { stroke: var(--muted); stroke-width: 1.3; fill: none; }
+.dia .edge.acc { stroke: var(--accent); }
+.dia .ah { fill: var(--muted); }
+.dia .ah.acc { fill: var(--accent); }
+.dia .el { fill: var(--muted); font-size: 11px; font-family: var(--font-mono); }
+.dia .el.acc { fill: var(--accent); }
+
+.mermaid { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; font-family: var(--font-body); }
+
+.jwt { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; }
+@media (max-width: 700px) { .jwt { grid-template-columns: minmax(0, 1fr); } }
+.jwt .part { display: grid; gap: 6px; min-width: 0; }
+.jwt .lab { font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.grid2 > * { min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; }
+.card h3 { margin: 0; }
+.card ul { font-size: 15px; }
+
+.sample { display: grid; gap: 12px; padding-top: 12px; }
+.sample + .sample { border-top: 1px solid var(--line); padding-top: 28px; margin-top: 12px; }
+.sample .tag { font-family: var(--font-mono); font-size: 12px; color: var(--key); }
+
+.phase td:first-child { font-family: var(--font-mono); font-weight: 500; white-space: nowrap; }
+.tree { font-size: 12.5px; }
+
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+<style>
+.decisions.five { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.chosen { font-size: 12px; font-family: var(--font-mono); color: var(--accent); }
+</style>
+
+<div class="page">
+<nav class="toc" aria-label="Contents">
+  <div class="brand">auth<span>-lib</span></div>
+  <ol>
+    <li><a href="#goals">Goals and decisions</a></li>
+    <li><a href="#today">Where we start</a></li>
+    <li><a href="#concepts">Concepts</a></li>
+    <li><a href="#modules">Modules and keys</a></li>
+    <li><a href="#profile">Client profile</a></li>
+    <li><a href="#roles">Roles</a></li>
+    <li><a href="#api">Library and API</a></li>
+    <li><a href="#data">Database</a></li>
+    <li><a href="#moves">What moves</a></li>
+    <li><a href="#web">Frontend</a></li>
+    <li><a href="#phases">Delivery phases</a></li>
+    <li><a href="#testing">Testing</a></li>
+    <li><a href="#risks">Risks</a></li>
+    <li><a href="#excluded">Not in v1</a></li>
+    <li><a href="#open">Open questions</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="doc">
+  <div class="eyebrow">Implementation plan · draft</div>
+  <h1>auth-lib: users, roles and permissions, <em>configured per client</em></h1>
+  <p class="lede">A Go library for user, role and permission management and sign-in, extracted from PPE-next2 and shared by every app. Each app declares its permissions as a <strong>module</strong>. Each client's <strong>profile</strong> picks the modules of its app set and defines the roles across them. It's the in-process step before auth-proto, which will be built on top of it.</p>
+  <div class="meta"><span>repo: remis-libs/auth-lib</span><span>date: 2026-11-27</span><span>basis: PPE-next2's user, session, role and security packages</span><span>first client: Gavort (PPE-next2 + Crew)</span></div>
+</header>
+
+<section id="goals">
+  <h2><span class="n">01</span>Goals and decisions</h2>
+  <ul>
+    <li><strong>One copy.</strong> The users, sessions, roles, permissions and security log that PPE-next2, PPE Crew and Baton each carry today become one library with its own tests.</li>
+    <li><strong>Configured, not forked.</strong> What differs between clients and app sets (modules, built-in roles, languages, session limits) is configuration, checked at start-up and in CI.</li>
+    <li><strong>Smaller apps.</strong> Auth leaves PPE's <code>cmd/api</code> and four packages, and stops needing a migration for every new permission.</li>
+    <li><strong>A path to auth-proto.</strong> The same services later run behind auth-proto's OAuth layer, with the database levels as stepping stones.</li>
+  </ul>
+  <div class="decisions five">
+    <div class="decision"><span class="k">1 · Profile</span><span class="v">A file read at start-up</span><span class="d">One build serves every client. Checked at start and in CI.</span><span class="chosen">chosen</span></div>
+    <div class="decision"><span class="k">2 · Keys</span><span class="v">Keep PPE's, prefix new modules</span><span class="d">Platform keys reserved. No renames in PPE.</span><span class="chosen">chosen</span></div>
+    <div class="decision"><span class="k">3 · Crew</span><span class="v">Module set in PPE's binary</span><span class="d">Tables in PPE's database (L1): foreign keys and transactions kept.</span><span class="chosen">chosen</span></div>
+    <div class="decision"><span class="k">4 · Built-ins</span><span class="v">Locked, synced from the profile</span><span class="d">Custom roles stay editable. Production's current sets are copied first.</span><span class="chosen">chosen</span></div>
+    <div class="decision"><span class="k">5 · Scope</span><span class="v">Gavort first, Baton in v2</span><span class="d">v1 on Postgres; v2 adds SQLite, roles per project, API tokens, invitations.</span><span class="chosen">chosen</span></div>
+  </div>
+</section>
+
+<section id="today">
+  <h2><span class="n">02</span>Where we start</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>App</th><th>Auth code</th><th>Permissions and roles</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><strong>PPE-next2</strong></td><td><code>internal/domain/{user,session,role}</code>, <code>internal/security</code>: 6,271 lines with tests; about 2,000 more in <code>cmd/api</code></td><td>43 permissions in 6 groups; 7 built-in roles with fixed ids; custom roles</td><td>The source. Its auth packages import only <code>audit</code>, <code>email</code> and <code>security</code>.</td></tr>
+      <tr><td><strong>PPE Crew</strong></td><td><code>internal/platform/iam/{user,session,role}</code>: 5,240 lines, copied from PPE on 2026-10-08</td><td>8 permissions (<code>users.manage</code>, <code>people.*</code>, <code>competence.*</code>, <code>projects.*</code>); 4 built-ins</td><td>Reads PPE's <code>users</code> in production (<code>API_SHARED_USERS_DB_DSN</code>). <code>user/service.go</code> already differs from PPE's by 369 lines.</td></tr>
+      <tr><td><strong>Baton</strong></td><td><code>internal/identity/*</code>: 5,379 lines, Postgres and SQLite</td><td>Workspace permissions; roles per project (<code>lead</code>, <code>member</code>, <code>client_reporter</code>, <code>client_viewer</code>)</td><td>Another client. API tokens, invitations, SQLite in production. v2.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Coupling inside PPE that the extraction has to cut:</p>
+  <ul>
+    <li><code>role</code> holds both the engine and PPE's permission list: 30 files in <code>cmd/api</code> and <code>launcher</code> use 64 <code>role.*</code> names.</li>
+    <li>24 migrations write <code>role_permissions</code>, usually one per new permission; <code>EnsureBuiltins</code> only inserts missing roles.</li>
+    <li>The user and role repositories call <code>audit.Insert</code> in their transaction, so changes land in PPE's sealed audit trail atomically.</li>
+    <li>80 foreign keys in 55 tables point at <code>users</code>; 15 Go files join it for names.</li>
+    <li>Built-in roles other than Administrator can be edited on Roles &amp; permissions today, within containment.</li>
+  </ul>
+</section>
+
+<section id="concepts">
+  <h2><span class="n">03</span>Concepts</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Concept</th><th>What it is</th><th>Defined in</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Platform</strong></td><td>What the library owns: users, sessions, roles, the security log, and the permissions to manage them</td><td>The library's code</td></tr>
+      <tr><td><strong>Module</strong></td><td>One part of an app with its own permissions: keys, groups, what each requires, label keys, and the apps it serves</td><td>The app's code, beside the routes that check those permissions</td></tr>
+      <tr><td><strong>App set</strong></td><td>The modules that share one user list and one set of roles: one deployment, one database</td><td>The client profile's <code>modules</code></td></tr>
+      <tr><td><strong>Client profile</strong></td><td>One client's choices: modules, built-in roles across them, add-on and guarded roles, languages, session limits, password rules, sign-in methods</td><td>A file per client, read at start-up</td></tr>
+      <tr><td><strong>Catalogue</strong></td><td>The platform's and the enabled modules' permissions, merged and checked. Roles may only grant from it</td><td>Built at start-up</td></tr>
+    </tbody>
+  </table></div>
+  <pre class="mermaid">
+flowchart LR
+  subgraph CODE["In code"]
+    PL["platform<br/>(auth-lib)"]
+    M1["workwear, administration,<br/>launcher, personnel,<br/>vault, dashboards<br/>(PPE-next2)"]
+    M2["people, competence,<br/>projects (Crew)"]
+  end
+  subgraph CFG["Per client"]
+    PR["gavort.yaml<br/>modules, roles,<br/>policies"]
+  end
+  PL --> ST["auth-lib at start-up<br/>merge, check,<br/>sync built-ins"]
+  M1 --> ST
+  M2 --> ST
+  PR --> ST
+  ST --> DB[("auth schema<br/>in the app's database")]
+  ST --> RT["routes, tokens,<br/>session.can()"]
+  </pre>
+  <p>One instance per client, with no tenants inside a database. Gavort's app set is PPE-next2's apps plus Crew's modules. A second client gets its own deployment and profile.</p>
+</section>
+
+<section id="modules">
+  <h2><span class="n">04</span>Modules and permission keys</h2>
+  <div class="file"><div class="name">a module, declared by the app</div>
+<pre><code><span class="k">var</span> Projects = access.Module{
+	Key:   <span class="s">"projects"</span>,
+	Label: <span class="s">"modules.projects"</span>, <span class="c">// the app's dictionary key</span>
+	Permissions: []access.Permission{
+		{Key: <span class="s">"projects.manage"</span>, Group: <span class="s">"projects"</span>},
+		{Key: <span class="s">"projects.assign"</span>, Group: <span class="s">"projects"</span>},
+		{Key: <span class="s">"projects.override"</span>, Group: <span class="s">"projects"</span>, Requires: []access.Key{<span class="s">"projects.assign"</span>}},
+	},
+	Apps: []access.AppEntry{{Slug: <span class="s">"crew"</span>, AnyOf: []access.Key{<span class="s">"projects.manage"</span>, <span class="s">"projects.assign"</span>}}},
+}
+
+<span class="c">// Typed keys for routes: rt.restricted("POST /api/v1/assignments", h.assign, perm.ProjectsAssign)</span>
+<span class="k">const</span> ProjectsAssign access.Key = <span class="s">"projects.assign"</span></code></pre></div>
+  <h3>Rules</h3>
+  <ul>
+    <li>A key is unique in its app set. The start-up check refuses a duplicate, naming both modules.</li>
+    <li><strong>Platform keys are reserved</strong>: <code>users.read</code>, <code>users.manage</code>, <code>roles.manage</code>, <code>security.read</code>. A module may not declare them.</li>
+    <li><strong>New modules' keys start with their module key</strong> (<code>projects.*</code>). Crew's keys already do: <code>people.*</code>, <code>competence.*</code>, <code>projects.*</code>.</li>
+    <li><strong>PPE's existing keys are kept</strong> as they are (<code>orders.delete</code>, <code>sim_cards.manage</code>). Its modules mark them <code>Legacy: true</code>, which exempts them from the prefix rule. Tokens, <code>session.can()</code> and <code>permissions.ts</code> don't change.</li>
+    <li>Crew's <code>users.manage</code> becomes the platform's. The two meant the same thing.</li>
+    <li>Removing a key from a module leaves it dormant: no role grants it any more, but rows stay, so a revert restores it.</li>
+  </ul>
+  <h3>Gavort's app set</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Module</th><th>Owner</th><th>Keys</th></tr></thead>
+    <tbody>
+      <tr><td><code>platform</code></td><td>auth-lib</td><td class="wrap"><code>users.read</code> <code>users.manage</code> <code>roles.manage</code> <code>security.read</code></td></tr>
+      <tr><td><code>administration</code></td><td>PPE</td><td class="wrap"><code>settings.manage</code> <code>mail_templates.manage</code> <code>document_templates.manage</code> <code>suppliers.manage</code> <code>companies.manage</code> <code>backups.read</code> <code>audit.read</code> <code>audit.export</code> <code>system.read</code> <code>usage.read</code> <code>ai_usage.read</code></td></tr>
+      <tr><td><code>launcher</code></td><td>PPE</td><td class="wrap"><code>apps.manage</code> <code>apps.preview</code></td></tr>
+      <tr><td><code>workwear</code></td><td>PPE</td><td class="wrap">employees, sizes, catalogue, prices, item sets, orders, assets, SIM cards, equipment, <code>data.export</code> (16 keys)</td></tr>
+      <tr><td><code>personnel</code></td><td>PPE</td><td class="wrap"><code>personnel.documents.read</code> <code>.manage</code> <code>personnel.portraits.colorize</code></td></tr>
+      <tr><td><code>vault</code></td><td>PPE</td><td class="wrap"><code>vault.read</code> <code>vault.manage</code> <code>vault.employment.read</code> <code>.manage</code></td></tr>
+      <tr><td><code>dashboards</code></td><td>PPE</td><td class="wrap"><code>dashboard.overview</code> <code>dashboard.manager</code> <code>dashboard.employee</code></td></tr>
+      <tr><td><code>people</code> · <code>competence</code> · <code>projects</code></td><td>Crew</td><td class="wrap"><code>people.manage</code> · <code>competence.manage</code> <code>.verify</code> <code>competence.medical.read</code> · <code>projects.manage</code> <code>.assign</code> <code>.override</code></td></tr>
+    </tbody>
+  </table></div>
+  <p class="cap">PPE's groups today (administration, launcher, workwear, personnel, vault, dashboards) become its modules. Only <code>security.read</code>, <code>users.*</code> and <code>roles.manage</code> move to the platform; <code>audit.*</code> stays with PPE, whose sealed trail it reads.</p>
+</section>
+
+<section id="profile">
+  <h2><span class="n">05</span>Client profile</h2>
+  <div class="file"><div class="name">deploy/clients/gavort/access.yaml (in PPE-next2's repo)</div>
+<pre><code><span class="k">client</span>: gavort
+<span class="k">modules</span>: [workwear, administration, launcher, personnel, vault, dashboards, people, competence, projects]
+<span class="k">languages</span>: [en, lt, ru]               <span class="c"># the first is a new user's default</span>
+<span class="k">sign_in</span>: { methods: [password], password: { min_bytes: 8, max_bytes: 72 } }
+<span class="k">sessions</span>: { max_age: 12h, keep_max_age: 720h, keep_idle: 336h, recent_sign_in: 12h, access_ttl: 15m }
+<span class="k">security_log</span>: { retention: 180d }
+<span class="k">roles</span>:
+  administrator:
+    { id: a0e1d000-0000-4000-8000-000000000001, guarded: true, grant: all, except_addons: true }
+  manager:
+    { id: a0e1d000-0000-4000-8000-000000000002, grant: [orders.delete, employees.merge, …, projects.assign] }
+  employee:
+    { id: a0e1d000-0000-4000-8000-000000000003, grant: [dashboard.employee, item_sets.read, …] }
+  equipment-assignments:
+    { id: a0e1d000-0000-4000-8000-000000000004, addon: true, grant: [equipment.read] }
+  planner:
+    { id: …, grant: [people.manage, projects.manage, projects.assign] }</code></pre></div>
+  <ul>
+    <li><strong>Where it lives.</strong> In the repository that deploys the client (PPE-next2's <code>deploy/clients/gavort/</code>), mounted read-only, its path in <code>API_ACCESS_PROFILE</code>. One build serves every client.</li>
+    <li><strong>What it replaces.</strong> PPE's <code>API_SESSION_*</code>, <code>API_RECENT_SIGN_IN</code>, <code>API_JWT_TTL</code>, <code>API_AUTH_EVENTS_RETENTION</code>, <code>builtin.go</code> and the permission lists in migrations. Secrets (<code>API_JWT_SECRET</code>, later signing keys) stay in the environment.</li>
+    <li><strong>Start-up check</strong>, which refuses to start and names the problem:
+      <ul>
+        <li>every module named exists in the binary, and every key in a role is in the catalogue</li>
+        <li>every key's <code>Requires</code> is granted alongside it</li>
+        <li>exactly one guarded role, holding <code>users.manage</code> and <code>roles.manage</code></li>
+        <li>add-on roles are not implied by <code>grant: all</code></li>
+        <li>role ids and keys are unique, and a built-in role's id never changes between versions</li>
+        <li>languages are ones the apps' dictionaries have</li>
+      </ul>
+    </li>
+    <li><strong>The same check in CI</strong>: <code>api -check-access deploy/clients/gavort/access.yaml</code>, run against the built binary's modules, so a bad profile fails the build, not the deploy.</li>
+    <li><code>/ready</code> reports the profile's client and hash; <code>/admin/</code> System shows them.</li>
+  </ul>
+</section>
+
+<section id="roles">
+  <h2><span class="n">06</span>Roles</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Built-in roles</h3>
+      <ul>
+        <li>Defined in the profile with a fixed id and key; names and descriptions come from the apps' dictionaries by key, as today.</li>
+        <li><strong>Locked</strong>: at start-up their permissions are set to the profile's, under a lock, with an audit event per change. They can't be edited on Roles &amp; permissions.</li>
+        <li>A built-in role missing from a newer profile is not deleted: it becomes a custom role, so users keep it.</li>
+        <li>Before locking, Phase 2 copies production's current built-in sets into the profile, so locking changes nothing on day one.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Custom roles</h3>
+      <ul>
+        <li>Rows, edited by administrators, as today. They may grant any catalogue key, within containment.</li>
+        <li>Keys from a module the profile turns off stay in the row, dormant, and are left out of tokens.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Rules carried over from PPE</h3>
+      <ul>
+        <li><strong>Add-on</strong>: never implied by another role, Administrator included (Equipment Assignments, Personnel Documents, Employment Documents, Testers).</li>
+        <li><strong>Containment</strong>: a role or user may be changed only by someone holding everything it grants.</li>
+        <li><strong>Guarded</strong>: at least one active user always holds the guarded role, checked after each change under an advisory lock.</li>
+        <li>No one takes <code>users.manage</code> or <code>roles.manage</code> from themselves.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Apps a user may open</h3>
+      <ul>
+        <li>A module lists the apps it serves and their entry permissions (<code>AnyOf</code>).</li>
+        <li><code>access.AppsFor(user)</code> answers which apps the user may open, so the launcher's rule and a future app switcher share one source.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="api">
+  <h2><span class="n">07</span>Library and API</h2>
+<pre class="tree"><code>auth-lib/                       <span class="c">module github.com/remisb/auth-lib</span>
+├── access.go                   <span class="c">New(Config) → *Access; Catalogue, AppsFor, Check</span>
+├── module.go  profile.go  check.go
+├── user/                       <span class="c">accounts, passwords, language, deactivate, delete (from PPE)</span>
+├── session/                    <span class="c">sign-ins, refresh token scheme, 2-minute grace, limits, end reasons, reauth</span>
+├── rbac/                       <span class="c">roles, built-in sync, add-on, guarded, containment</span>
+├── seclog/                     <span class="c">auth_events, sign-in limits, devices, access review</span>
+├── store/postgres/             <span class="c">pgx; v2 adds store/sqlite/ and contract tests on both</span>
+├── migrations/postgres/        <span class="c">embedded; own version table auth.schema_migrations</span>
+├── tokens/                     <span class="c">HS256 access tokens as today; EdDSA later for auth-proto</span>
+├── httpauth/                   <span class="c">/auth/* sign-in routes, users, roles, security routes, registered through the app's router</span>
+├── muxauth/                    <span class="c">muxstack Authenticator and Authorizer</span>
+└── authtest/                   <span class="c">fakes, in-memory store, fixtures, Reset for Postgres tests</span></code></pre>
+  <div class="file"><div class="name">PPE-next2: cmd/api wiring</div>
+<pre><code>acc, err := access.New(ctx, access.Config{
+	Profile:  cfg.AccessProfile,                                        <span class="c">// API_ACCESS_PROFILE</span>
+	Modules:  []access.Module{perm.Administration, perm.Launcher, perm.Workwear, perm.Personnel, perm.Vault, perm.Dashboards,
+		crewperm.People, crewperm.Competence, crewperm.Projects},
+	Store:    postgres.New(pool),                                       <span class="c">// schema "auth" in PPE's database</span>
+	Recorder: auditRecorder{},                                          <span class="c">// audit.Insert in the library's transaction</span>
+	Request:  requestInfo,                                              <span class="c">// request id, sign-in id and app slug from ctx</span>
+	Hooks:    access.Hooks{BeforeDelete: refuseIfEmployeeHolds},
+	Secret:   cfg.JWTSecret,
+	Clock:    clock,
+})
+<span class="k">if</span> err != <span class="k">nil</span> {
+	log.Fatal(err) <span class="c">// the profile's problems, named</span>
+}
+httpauth.Register(rt, acc)                                          <span class="c">// rt.public / rt.authenticated / rt.restricted: TestRoutePolicy still pins them</span>
+rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, perm.OrdersDelete) <span class="c">// unchanged but for the import</span></code></pre></div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Ports the app supplies</h3>
+      <ul>
+        <li><code>Recorder</code>: called inside the library's transaction with its events (<code>user.*</code>, <code>role.*</code>), so PPE's sealed audit trail keeps recording them atomically. Names stay as they are.</li>
+        <li><code>Request</code>: the request's id, sign-in and app slug, for the security log.</li>
+        <li><code>Hooks</code>: <code>BeforeDelete</code>, <code>BeforeDeactivate</code>, which may veto in the same transaction.</li>
+        <li><code>Mailer</code> (v2): invitations and resets.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Boundaries</h3>
+      <ul>
+        <li>The library imports no app package. A test in the library fails on any <code>remisb/ppe-*</code> or <code>baton</code> import.</li>
+        <li>The library's services never import <code>net/http</code>; only <code>httpauth</code> and <code>muxauth</code> do.</li>
+        <li>HTTP shapes stay PPE's (<code>{"error": …}</code>, the same JSON), so the apps' clients don't change in v1.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="data">
+  <h2><span class="n">08</span>Database</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Level</th><th>When</th><th>Shape</th><th>Kept</th><th>Lost</th></tr></thead>
+    <tbody>
+      <tr><td><strong>L0</strong></td><td>Phase 1</td><td>The library on PPE's existing tables in <code>public</code></td><td>Everything</td><td>Nothing</td></tr>
+      <tr><td><strong>L1</strong></td><td>Phase 3, v1's target</td><td>Schema <code>auth</code> in the app's database: <code>users</code>, <code>user_sessions</code>, <code>roles</code>, <code>role_permissions</code>, <code>user_roles</code>, <code>auth_events</code></td><td>Foreign keys (<code>REFERENCES auth.users</code>), shared transactions, joins</td><td>Nothing</td></tr>
+      <tr><td><strong>L2</strong></td><td>Later, when an app needs it</td><td>A separate database. The app keeps a <code>users</code> mirror (id, email, name, active, language) updated after commit and from a change feed</td><td>Foreign keys to the mirror</td><td>Audit in the same transaction (a feed instead) and joins into the security log</td></tr>
+      <tr><td><strong>L3</strong></td><td>auth-proto</td><td>The store behind HTTP, same ports</td><td>App code</td><td>Needs the service running</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><strong>Migrations</strong>: the library embeds its own, with its own version table <code>auth.schema_migrations</code>, run by <code>api -migrate-auth</code> before the app's. PPE's <code>make migrate</code>, <code>deploy/migrate.sh</code> and <code>/ready</code> call it.</li>
+    <li><strong>Moving into <code>auth</code></strong>: the first library migration is a baseline. When <code>public.users</code> exists, it moves the six tables with <code>ALTER TABLE … SET SCHEMA</code>, which keeps every foreign key, index, trigger and row. On an empty database it creates them.</li>
+    <li><strong>Grants</strong>: the library ships <code>grants.sql</code> for its schema, taking the app's role name (<code>ppe_app</code>) as a parameter. Append-only <code>auth_events</code> and its purge function move with it.</li>
+    <li><strong>Tests</strong>: <code>authtest.Reset(tx)</code> empties the library's tables and syncs built-ins again, replacing <code>TRUNCATE users CASCADE</code> plus <code>role.EnsureBuiltins</code>.</li>
+    <li><strong>SQLite</strong> (v2, for Baton): <code>store/sqlite</code> on <code>modernc.org/sqlite</code>, ported from Baton's approach (WAL, <code>BEGIN IMMEDIATE</code> for <code>FOR UPDATE</code> and the advisory lock, UTC text times, paired migration folders), with one contract test run on both stores. It applies at L2, or to an app that is entirely on SQLite.</li>
+  </ul>
+</section>
+
+<section id="moves">
+  <h2><span class="n">09</span>What moves</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Out of PPE-next2</h3>
+      <ul>
+        <li><code>internal/domain/{user,session,role}</code> and <code>internal/security</code> into the library.</li>
+        <li><code>cmd/api/auth.go</code>, <code>auth-cookie.go</code>, <code>auth-routes.go</code>, <code>user-routes.go</code>, <code>role-routes.go</code>, <code>security-routes.go</code> into <code>httpauth</code>, with their tests.</li>
+        <li><code>role/permission.go</code> splits: the engine into the library; PPE's keys, groups and requirements into a new <code>internal/perm</code> with its modules. The 64 <code>role.*</code> names become <code>perm.*</code>: mechanical.</li>
+        <li><code>role/builtin.go</code> into <code>deploy/clients/gavort/access.yaml</code>.</li>
+        <li>New permissions stop needing a migration.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Out of PPE Crew</h3>
+      <ul>
+        <li><code>internal/platform/iam</code> is deleted; Crew's API uses the library.</li>
+        <li>Its keys move into three modules, <code>people</code>, <code>competence</code> and <code>projects</code>, unchanged except <code>users.manage</code>, now the platform's.</li>
+        <li>Its built-in roles (<code>planner</code>, <code>coordinator</code>, <code>viewer</code>) move into Gavort's profile once its modules join PPE's binary; until then, into a profile of its own.</li>
+        <li><code>API_SHARED_USERS_DB_DSN</code> stays until the merge.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Stays in each app</h3>
+      <ul>
+        <li>The permission keys and modules, and every check on a route.</li>
+        <li>The audit trail and its seals.</li>
+        <li>Anything finer than a role: which employee a user is, Baton's project roles (until v2).</li>
+        <li>Screens: Sign in, Account, Users, Roles &amp; permissions, Security (see <a href="#web">Frontend</a>).</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="web">
+  <h2><span class="n">10</span>Frontend</h2>
+  <ul>
+    <li><strong>v1 changes no screen.</strong> The routes keep their paths and JSON, so <code>@ppe/app-shell</code>'s sign-in, Confirm your password and session code, and Administration's Users, Roles &amp; permissions and Security, work as they are.</li>
+    <li>Roles &amp; permissions marks built-in roles read-only (decision 4) and groups permissions by module, from <code>GET /api/v1/roles/catalogue</code>.</li>
+    <li><code>@ppe/api-client</code>'s <code>permissions.ts</code> stays hand-written. The Go test that compares it now reads the catalogue built from the modules.</li>
+    <li>Later: <code>@remisb/auth-react</code> with Sign in, Confirm your password, Account and the Users and Roles screens, for Crew and Baton to share. Labels stay in each app's dictionaries, by key.</li>
+  </ul>
+</section>
+
+<section id="phases">
+  <h2><span class="n">11</span>Delivery phases</h2>
+  <div class="tbl"><table class="phase">
+    <thead><tr><th>Phase</th><th>Scope</th><th>Done when</th></tr></thead>
+    <tbody>
+      <tr><td>P0 Repository</td><td><code>remis-libs/auth-lib</code>: module, CI with Postgres, CLAUDE.md, an ADR on modules and client profiles, the profile format and its check</td><td>CI green; the check refuses a set of bad profiles, each with its message</td></tr>
+      <tr><td>P1 Extract as-is</td><td>The four packages and the <code>cmd/api</code> auth files moved with their tests; ports for <code>Recorder</code>, <code>Request</code>, <code>Hooks</code>; the store on PPE's existing tables (L0). PPE switches with no change in behaviour.</td><td>PPE's Go tests, <code>TestRoutePolicy</code>, <code>TestSeededRolesKeepPolicy</code> and e2e pass unchanged; the old packages are deleted</td></tr>
+      <tr><td>P2 Modules and profile</td><td>PPE's keys into <code>internal/perm</code> modules; <code>role.*</code> → <code>perm.*</code>; production's current built-in sets read and written into <code>gavort/access.yaml</code>; built-ins synced and locked; <code>-check-access</code> in CI; session settings read from the profile</td><td>A golden test shows the profile yields exactly production's role → permission sets; a new permission ships with no migration</td></tr>
+      <tr><td>P3 Own schema (L1)</td><td>Embedded migrations with the baseline move to <code>auth</code>; grants; <code>-migrate-auth</code> in <code>make migrate</code>, <code>deploy/migrate.sh</code> and <code>/ready</code>; <code>authtest.Reset</code></td><td>Up, down, up in CI; a restored production backup migrates with every foreign key intact</td></tr>
+      <tr><td>P4 Crew</td><td>(a) Crew drops <code>iam</code> for the library with its own profile; (b) when its contexts move into PPE's binary (ADR 0001), its modules and roles join Gavort's profile and its role assignments are imported</td><td>(a) Crew's tests pass with <code>iam</code> deleted; (b) a Crew planner signs in to PPE's binary with Crew's permissions</td></tr>
+      <tr><td>P5 v2 for Baton</td><td>SQLite store and contract tests, roles per resource scope (Baton's projects), API tokens and invitations (from Baton), the <code>Mailer</code> port; a <code>remisb</code> profile</td><td>The contract test passes on both stores; Baton's identity packages are deleted</td></tr>
+      <tr><td>P6 Later</td><td>L2 (separate database with the mirror and change feed); token format per the guidelines (server sessions) or EdDSA; auth-proto on top</td><td>Its own plan, in auth-proto</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="testing">
+  <h2><span class="n">12</span>Testing</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>In the library</h3>
+      <ul>
+        <li>The services' tests from PPE, moved with them, on fakes: refresh rotation and grace, limits, containment, the guarded role, the email limit.</li>
+        <li>Store tests on real Postgres, in their own database, in parallel, independent of any app's test lock.</li>
+        <li>Profile checks: table tests of good and bad profiles and modules.</li>
+        <li>Built-in sync: adds, removes, keeps dormant, writes one event per change, is a no-op the second time.</li>
+        <li>Migrations: the baseline on an empty database and on a copy of PPE's tables.</li>
+        <li>Import boundaries: no app package, no <code>net/http</code> in services.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>In the apps</h3>
+      <ul>
+        <li>PPE keeps <code>TestRoutePolicy</code> and <code>TestSeededRolesKeepPolicy</code>, now fed by the profile.</li>
+        <li>A golden test: <code>gavort/access.yaml</code> gives the role → permission sets recorded from production.</li>
+        <li><code>permissions.ts</code> against the catalogue, as today.</li>
+        <li>e2e unchanged; its global setup seeds through the library.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="risks">
+  <h2><span class="n">13</span>Risks</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>A bad profile stops the API at deploy</td><td><code>-check-access</code> in CI on the same binary; <code>prod-up</code> waits for <code>/ready</code> before replacing Caddy, so the old API keeps serving</td></tr>
+      <tr><td>Locking built-ins drops an edit made in production</td><td>P2 copies production's sets first and the golden test proves equality; a profile may still mark a built-in <code>seeded</code> (created once, then editable) for a client who wants that</td></tr>
+      <tr><td>The library grows to fit three apps' differences</td><td>A small core; API tokens, invitations and resource scopes as optional packages in v2; an app's quirks stay in the app through <code>Hooks</code></td></tr>
+      <tr><td>Changes spanning library and app need two releases</td><td><code>go.work</code> locally; tagged versions; the library's CI runs PPE's auth tests against the change before tagging</td></tr>
+      <tr><td>Another private module in the image builds</td><td>The same <code>.github-token</code> secret as dbbackup and pdf-mini, with read access added; or make the repository public, as it holds no secrets</td></tr>
+      <tr><td>The schema move on a live database</td><td>One transaction, rehearsed on a restored backup (<code>make prod-drill</code>); the down migration moves the tables back</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="excluded">
+  <h2><span class="n">14</span>Not in v1</h2>
+  <ul>
+    <li>SQLite, roles per project or other resource, API tokens, invitations, email sign-in codes (v2, with Baton).</li>
+    <li>A separate auth database and the users mirror (L2).</li>
+    <li>A new token format: v1 keeps PPE's HS256 access tokens and refresh cookie as they are.</li>
+    <li>Shared React screens (<code>@remisb/auth-react</code>).</li>
+    <li>Several clients in one database.</li>
+  </ul>
+</section>
+
+<section id="open">
+  <h2><span class="n">15</span>Open questions</h2>
+  <ul>
+    <li><strong>Profile format.</strong> YAML is easy to read and review; JSON needs no parser dependency. YAML is proposed, through a small, strict decoder that refuses unknown fields.</li>
+    <li><strong>Crew's merge timing.</strong> P4(b) waits for Crew's contexts to move into PPE's binary. Until then Crew runs the library with its own profile.</li>
+    <li><strong>Public or private repository.</strong> Public removes a build secret; private matches dbbackup and pdf-mini.</li>
+    <li><strong>Server sessions.</strong> The guidelines prefer opaque server sessions to JWTs. The library is where that change would be made once for every app. Which phase should it be?</li>
+  </ul>
+</section>
+</main>
+</div>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral" });
+</script>
+</html>
