@@ -186,6 +186,7 @@ html { scroll-behavior: smooth; }
     <li><a href="#modules">Modules and keys</a></li>
     <li><a href="#profile">Client profile</a></li>
     <li><a href="#roles">Roles</a></li>
+    <li><a href="#objects">Object scopes</a></li>
     <li><a href="#api">Library and API</a></li>
     <li><a href="#data">Database</a></li>
     <li><a href="#moves">What moves</a></li>
@@ -202,16 +203,17 @@ html { scroll-behavior: smooth; }
 <header class="doc">
   <div class="eyebrow">Implementation plan · draft</div>
   <h1>auth-lib: users, roles and permissions, <em>configured per client</em></h1>
-  <p class="lede">A Go library for user, role and permission management and sign-in, extracted from PPE-next2 and shared by every app. Each app declares its permissions as a <strong>module</strong>. Each client's <strong>profile</strong> picks the modules of its app set and defines the roles across them. It's the in-process step before auth-proto, which will be built on top of it.</p>
+  <p class="lede">A Go library for user, role and permission management and sign-in, extracted from PPE-next2 and shared by every app. Each app declares its permissions as a <strong>module</strong>. Each client's <strong>profile</strong> picks the modules of its app set and defines the roles across them. Roles are granted everywhere or on particular <strong>objects</strong> (object-based RBAC). It's the in-process step before auth-proto, which will be built on top of it.</p>
   <div class="meta"><span>repo: remis-libs/auth-lib</span><span>date: 2026-11-27</span><span>basis: PPE-next2's user, session, role and security packages</span><span>first client: Gavort (PPE-next2 + Crew)</span></div>
 </header>
 
 <section id="goals">
   <h2><span class="n">01</span>Goals and decisions</h2>
   <ul>
-    <li><strong>One copy.</strong> The users, sessions, roles, permissions and security log that PPE-next2, PPE Crew and Baton each carry today become one library with its own tests.</li>
+    <li><strong>One copy.</strong> The users, sessions, roles, permissions and security log that PPE-next2 and PPE Crew each carry today become one library with its own tests.</li>
     <li><strong>Configured, not forked.</strong> What differs between clients and app sets (modules, built-in roles, languages, session limits) is configuration, checked at start-up and in CI.</li>
     <li><strong>Smaller apps.</strong> Auth leaves PPE's <code>cmd/api</code> and four packages, and stops needing a migration for every new permission.</li>
+    <li><strong>Object-based roles.</strong> A role may be granted on one client, project or company and what is under it, not only system-wide (<a href="#objects">Object scopes</a>).</li>
     <li><strong>A small surface.</strong> Everything lives in <code>internal/</code> except the few names an app must touch; the exported API is checked in and reviewed (<a href="#api">Library and API</a>).</li>
     <li><strong>A path to auth-proto.</strong> The same services later run behind auth-proto's OAuth layer, with the database levels as stepping stones.</li>
   </ul>
@@ -220,7 +222,8 @@ html { scroll-behavior: smooth; }
     <div class="decision"><span class="k">2 · Keys</span><span class="v">Keep PPE's, prefix new modules</span><span class="d">Platform keys reserved. No renames in PPE.</span><span class="chosen">chosen</span></div>
     <div class="decision"><span class="k">3 · Crew</span><span class="v">Module set in PPE's binary</span><span class="d">Tables in PPE's database (L1): foreign keys and transactions kept.</span><span class="chosen">chosen</span></div>
     <div class="decision"><span class="k">4 · Built-ins</span><span class="v">Locked, synced from the profile</span><span class="d">Custom roles stay editable. Production's current sets are copied first.</span><span class="chosen">chosen</span></div>
-    <div class="decision"><span class="k">5 · Scope</span><span class="v">Gavort first, Baton in v2</span><span class="d">v1 on Postgres; v2 adds SQLite, roles per project, API tokens, invitations.</span><span class="chosen">chosen</span></div>
+    <div class="decision"><span class="k">5 · Scope</span><span class="v">Gavort's app set first</span><span class="d">v1 for PPE-next2 and Crew, on Postgres. Other apps and clients later.</span><span class="chosen">chosen</span></div>
+    <div class="decision"><span class="k">6 · Objects</span><span class="v">Roles granted on objects</span><span class="d">The app supplies parents; ownership stays in apps; scoped checks on the server; in v1's schema.</span><span class="chosen">chosen</span></div>
   </div>
 </section>
 
@@ -231,7 +234,6 @@ html { scroll-behavior: smooth; }
     <tbody>
       <tr><td><strong>PPE-next2</strong></td><td><code>internal/domain/{user,session,role}</code>, <code>internal/security</code>: 6,271 lines with tests; about 2,000 more in <code>cmd/api</code></td><td>43 permissions in 6 groups; 7 built-in roles with fixed ids; custom roles</td><td>The source. Its auth packages import only <code>audit</code>, <code>email</code> and <code>security</code>.</td></tr>
       <tr><td><strong>PPE Crew</strong></td><td><code>internal/platform/iam/{user,session,role}</code>: 5,240 lines, copied from PPE on 2026-10-08</td><td>8 permissions (<code>users.manage</code>, <code>people.*</code>, <code>competence.*</code>, <code>projects.*</code>); 4 built-ins</td><td>Reads PPE's <code>users</code> in production (<code>API_SHARED_USERS_DB_DSN</code>). <code>user/service.go</code> already differs from PPE's by 369 lines.</td></tr>
-      <tr><td><strong>Baton</strong></td><td><code>internal/identity/*</code>: 5,379 lines, Postgres and SQLite</td><td>Workspace permissions; roles per project (<code>lead</code>, <code>member</code>, <code>client_reporter</code>, <code>client_viewer</code>)</td><td>Another client. API tokens, invitations, SQLite in production. v2.</td></tr>
     </tbody>
   </table></div>
   <p>Coupling inside PPE that the extraction has to cut:</p>
@@ -253,6 +255,8 @@ html { scroll-behavior: smooth; }
       <tr><td><strong>Module</strong></td><td>One part of an app with its own permissions: keys, groups, what each requires, label keys, and the apps it serves</td><td>The app's code, beside the routes that check those permissions</td></tr>
       <tr><td><strong>App set</strong></td><td>The modules that share one user list and one set of roles: one deployment, one database</td><td>The client profile's <code>modules</code></td></tr>
       <tr><td><strong>Client profile</strong></td><td>One client's choices: modules, built-in roles across them, add-on and guarded roles, languages, session limits, password rules, sign-in methods</td><td>A file per client, read at start-up</td></tr>
+      <tr><td><strong>Object type</strong></td><td>A kind of thing a role can be limited to (<code>client</code> → <code>project</code>), with its parent</td><td>The module (<a href="#objects">Object scopes</a>)</td></tr>
+      <tr><td><strong>Assignment</strong></td><td>A user holding a role on a scope: global, or one object and what is under it</td><td>The library's database</td></tr>
       <tr><td><strong>Catalogue</strong></td><td>The platform's and the enabled modules' permissions, merged and checked. Roles may only grant from it</td><td>Built at start-up</td></tr>
     </tbody>
   </table></div>
@@ -379,7 +383,7 @@ flowchart LR
       <h3>Rules carried over from PPE</h3>
       <ul>
         <li><strong>Add-on</strong>: never implied by another role, Administrator included (Equipment Assignments, Personnel Documents, Employment Documents, Testers).</li>
-        <li><strong>Containment</strong>: a role or user may be changed only by someone holding everything it grants.</li>
+        <li><strong>Containment</strong>: a role or user may be changed only by someone holding everything it grants, on that scope or above.</li>
         <li><strong>Guarded</strong>: at least one active user always holds the guarded role, checked after each change under an advisory lock.</li>
         <li>No one takes <code>users.manage</code> or <code>roles.manage</code> from themselves.</li>
       </ul>
@@ -394,14 +398,103 @@ flowchart LR
   </div>
 </section>
 
+<section id="objects">
+  <h2><span class="n">07</span>Object scopes</h2>
+  <p>Roles are <strong>object-based</strong>: a user holds a role on a <strong>scope</strong>, either everywhere (global, as today), on one object, or on everything under an object. A check names the object it is about, so a permission applies to particular items rather than system-wide. Today's role holdings become global grants, so nothing changes for PPE until a module uses scopes.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Term</th><th>Meaning</th><th>Defined in</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Object type</strong></td><td>A kind of thing access can be limited to, with an optional parent type: <code>client</code> → <code>project</code>, <code>company</code> → <code>employee</code></td><td>The module</td></tr>
+      <tr><td><strong>Object</strong></td><td>A type and an id (<code>project</code>, <code>P-114</code>). The object itself is the app's data; the library stores only its type and id</td><td>The app's database</td></tr>
+      <tr><td><strong>Scope</strong></td><td>Where a grant applies: global, or one object and everything under it</td><td>Each assignment</td></tr>
+      <tr><td><strong>Assignment</strong></td><td>A user holding a role on a scope, with who granted it, when, and an optional expiry</td><td>The library's database</td></tr>
+      <tr><td><strong>Check</strong></td><td>"May this caller do <em>key</em> to <em>object</em>?" True when an unexpired assignment's role grants the key and its scope is global, the object, or one of the object's ancestors</td><td>The library, at run time</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Declaring object types and where permissions apply</h3>
+  <div class="file"><div class="name">Crew's projects module</div>
+<pre><code><span class="k">var</span> Projects = authlib.Module{
+	Key: <span class="s">"projects"</span>,
+	ObjectTypes: []authlib.ObjectType{
+		{Name: <span class="s">"client"</span>},
+		{Name: <span class="s">"project"</span>, Parent: <span class="s">"client"</span>},
+	},
+	Permissions: []authlib.Permission{
+		{Key: <span class="s">"projects.manage"</span>, Group: <span class="s">"projects"</span>, On: <span class="s">"client"</span>},
+		{Key: <span class="s">"projects.assign"</span>, Group: <span class="s">"projects"</span>, On: <span class="s">"project"</span>},
+		{Key: <span class="s">"projects.override"</span>, Group: <span class="s">"projects"</span>, On: <span class="s">"project"</span>, Requires: []authlib.Key{<span class="s">"projects.assign"</span>}},
+	},
+}</code></pre></div>
+  <ul>
+    <li>A permission without <code>On</code> is global only (<code>settings.manage</code>, <code>users.manage</code>). A permission with <code>On: "project"</code> may be granted globally (every project), on a client (its projects), or on one project.</li>
+    <li>Object type names are unique in the app set, like keys; a parent must be declared in the same module or one the module depends on.</li>
+  </ul>
+
+  <h3>Roles granted on a scope</h3>
+  <div class="file"><div class="name">gavort/access.yaml, roles</div>
+<pre><code>  planner:          { id: …, grant: [people.manage, projects.manage, projects.assign] }   <span class="c"># global only, the default</span>
+  client-planner:   { id: …, grant: [projects.manage, projects.assign], assignable_on: [global, client] }
+  site-coordinator: { id: …, grant: [projects.assign], assignable_on: [project] }</code></pre></div>
+  <ul>
+    <li><code>assignable_on</code> lists the scopes a role may be granted on; the default is <code>[global]</code>.</li>
+    <li>The start-up check refuses a role assignable on a type when one of its permissions doesn't apply there: <code>people.manage</code> is global only, so <code>planner</code> can't be granted on a client.</li>
+    <li><strong>Containment per scope</strong>: someone may grant a role on <code>Shell</code> only when they hold everything it grants on <code>Shell</code> or above.</li>
+    <li>The guarded role (Administrator) is always global. Add-on roles may be scoped. Grants may expire (<code>expires_at</code>), for temporary access.</li>
+  </ul>
+
+  <h3>Checks in the app</h3>
+  <div class="file"><div class="name">one object, and a list</div>
+<pre><code><span class="c">// The route's gate passes when the caller holds the key anywhere; the handler then asks about the object.</span>
+rt.restricted(<span class="s">"POST /api/v1/projects/{id}/assignments"</span>, h.assign, perm.ProjectsAssign)
+
+ok, err := auth.Can(ctx, p, perm.ProjectsAssign, authlib.Object{Type: <span class="s">"project"</span>, ID: id})
+<span class="k">if</span> !ok { <span class="k">return</span> authlib.ErrForbidden }
+
+<span class="c">// A list: everything, or the objects to filter by.</span>
+in, err := auth.Scopes(ctx, p, perm.ProjectsAssign, <span class="s">"project"</span>)
+<span class="k">if</span> !in.All() {
+	rows, err = q.ProjectsWithin(ctx, in.IDs(<span class="s">"client"</span>), in.IDs(<span class="s">"project"</span>))
+	<span class="c">// WHERE client_id = ANY($1) OR id = ANY($2)</span>
+}</code></pre></div>
+  <ul>
+    <li><strong>Parents come from the app.</strong> <code>Config.Ancestry</code> is a function that answers an object's ancestors (a project's client). The library calls it only when the caller holds a scoped grant of an ancestor type, and caches the answer for the request. Objects are never copied into the library.</li>
+    <li><strong>Lists</strong> are the hard part of object-based access. <code>Scopes</code> returns <code>All</code> for a global grant, or the ids per type on the path down to the type asked for, and the app filters its own query with them.</li>
+    <li><strong>Deleting an object</strong>: the app calls <code>auth.Forget(ctx, obj)</code> to drop the assignments on it. An assignment left on an unknown id grants nothing.</li>
+    <li><strong>Where checks run.</strong> Global keys stay in the access token, so <code>p.Can(key)</code>, <code>session.can()</code> and PPE's routes work as today. Scoped grants are never put in tokens. They are loaded on the server on the first scoped check of a request and cached per user and <code>access_version</code>. The version is one indexed read per such request and moves with every grant or removal, so a removed grant stops working on the next request.</li>
+  </ul>
+
+  <h3>What stays in the app</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Rule</th><th>Example</th><th>Why not object scopes</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Ownership</strong></td><td>PPE: only a share link's maker revokes it; only the uploader sees a kept scan; the Employee Dashboard shows the user's own orders</td><td>Access comes from a relationship to the record, not a role. Relation-based rules (Zanzibar-style) are a larger system, not planned</td></tr>
+      <tr><td><strong>Field visibility</strong></td><td>PPE's <code>employee.Sight</code> and <code>asset.Sight</code> blank fields without a permission</td><td>They decide what to show of an object the caller may already see; they may call <code>Can</code> with a scope</td></tr>
+      <tr><td><strong>Conditions on values</strong></td><td>Orders under a limit, actions on weekdays</td><td>Attribute-based rules; not planned</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Where it applies</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Use case</th><th>Object types</th><th>Example</th><th>When</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Crew</strong></td><td><code>client</code> → <code>project</code></td><td>A planner or coordinator for one client's projects only</td><td>P4, the first scoped use</td></tr>
+      <tr><td><strong>PPE: companies</strong></td><td><code>company</code> → <code>employee</code></td><td>A manager who sees and orders only for their company's employees; PPE already records employments per company</td><td>Next candidate</td></tr>
+      <tr><td><strong>PPE: App Launcher</strong></td><td><code>app</code></td><td>Testers for one app in testing (<code>apps.preview</code> on <code>docs-scan</code>)</td><td>When asked</td></tr>
+      <tr><td><strong>PPE: Document Vault</strong></td><td><code>company</code></td><td>Employment Documents for one company's employees</td><td>With companies</td></tr>
+      <tr><td><strong>Client access</strong></td><td>the client's objects</td><td>Someone from a client given a narrow role on their own client or project, through the same assignments as staff</td><td>When needed</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
 <section id="api">
-  <h2><span class="n">07</span>Library and API</h2>
+  <h2><span class="n">08</span>Library and API</h2>
   <p><strong>Everything starts in <code>internal/</code>.</strong> Go refuses any import of an <code>internal</code> package from outside the module, so apps can't depend on the library's services, stores, tokens or handlers. Each exported name is a promise that must be kept across versions, so the library exports only what an app has to touch: declaring its permissions, wiring the library in, registering its routes, and asking who the caller is and what they may do.</p>
 <pre class="tree"><code>auth-lib/                       <span class="c">module github.com/remisb/auth-lib</span>
 ├── authlib.go                  <span class="c">package authlib: New, Config, *Auth and its methods</span>
 ├── module.go                   <span class="c">Module, Permission, Key, AppEntry: what an app declares</span>
 ├── principal.go                <span class="c">Principal (opaque), PrincipalFrom</span>
-├── store.go                    <span class="c">Store (sealed), Postgres(pool, PostgresOptions); v2 SQLite(db, …)</span>
+├── store.go                    <span class="c">Store (sealed), Postgres(pool, PostgresOptions); later SQLite(db, …)</span>
 ├── errors.go                   <span class="c">ErrNotFound, ErrForbidden, ErrInvalid, ErrProfile, FieldError</span>
 ├── example_test.go             <span class="c">an example for every exported name</span>
 ├── api.txt                     <span class="c">the exported API, checked in; CI compares it</span>
@@ -412,23 +505,23 @@ flowchart LR
     ├── profile/  catalogue/                   <span class="c">profile parsing, the start-up check, built-in sync</span>
     ├── token/  password/                      <span class="c">access tokens, refresh token scheme, bcrypt</span>
     ├── httpapi/                               <span class="c">every handler: /auth/*, users, roles, security</span>
-    ├── store/postgres/  store/sqlite/ (v2)    <span class="c">repositories; contract tests on both</span>
-    └── migrations/postgres/  migrations/sqlite/ (v2)</code></pre>
+    ├── store/postgres/  store/sqlite/ (later)    <span class="c">repositories; contract tests on both</span>
+    └── migrations/postgres/  migrations/sqlite/ (later)</code></pre>
 
   <h3>The whole public surface</h3>
   <div class="tbl"><table>
     <thead><tr><th>Package</th><th>Exported</th><th>Why the app needs it</th></tr></thead>
     <tbody>
-      <tr><td class="wrap"><code>authlib</code>: declaring</td><td class="wrap"><code>Module</code>, <code>Permission</code>, <code>Key</code>, <code>AppEntry</code></td><td>Each app declares its permissions in code; routes use typed <code>Key</code> constants</td></tr>
+      <tr><td class="wrap"><code>authlib</code>: declaring</td><td class="wrap"><code>Module</code>, <code>Permission</code> (with <code>On</code>), <code>Key</code>, <code>AppEntry</code>, <code>ObjectType</code></td><td>Each app declares its permissions and object types in code; routes use typed <code>Key</code> constants</td></tr>
       <tr><td class="wrap"><code>authlib</code>: wiring</td><td class="wrap"><code>New</code>, <code>Config</code>, <code>Store</code>, <code>Postgres</code>, <code>PostgresOptions</code>, <code>Event</code>, <code>Request</code>, <code>CheckProfile</code></td><td>Start the library with the profile, modules, database and the app's ports; check a profile in CI</td></tr>
-      <tr><td class="wrap"><code>*authlib.Auth</code></td><td class="wrap"><code>Routes(Registrar)</code>, <code>Middleware</code>, <code>Migrate</code>, <code>Ready</code>, <code>RunJobs</code>, <code>SeedAdmin</code>, <code>User</code>, <code>AppsFor</code>, <code>Catalogue</code></td><td>Register the library's routes through the app's router, run its migrations and upkeep, seed the first admin, read a user's public details</td></tr>
+      <tr><td class="wrap"><code>*authlib.Auth</code></td><td class="wrap"><code>Routes(Registrar)</code>, <code>Middleware</code>, <code>Migrate</code>, <code>Ready</code>, <code>RunJobs</code>, <code>SeedAdmin</code>, <code>User</code>, <code>AppsFor</code>, <code>Catalogue</code>, <code>Can</code>, <code>Scopes</code>, <code>Forget</code></td><td>Register the library's routes through the app's router, run its migrations and upkeep, seed the first admin, read a user's public details, check and list access to objects</td></tr>
       <tr><td class="wrap"><code>authlib</code>: the caller</td><td class="wrap"><code>Principal</code> (methods <code>UserID</code>, <code>SessionID</code>, <code>Can</code>, <code>Language</code>, <code>SignedInWithin</code>), <code>PrincipalFrom</code>, <code>Registrar</code></td><td>Who is calling and what they may do, inside the app's handlers</td></tr>
-      <tr><td class="wrap"><code>authlib</code>: results</td><td class="wrap"><code>UserInfo</code> (<code>ID</code>, <code>Email</code>, <code>Name</code>, <code>Language</code>, <code>Active</code>), <code>PermissionInfo</code>, <code>ErrNotFound</code>, <code>ErrForbidden</code>, <code>ErrInvalid</code>, <code>ErrProfile</code>, <code>FieldError</code></td><td>Values returned to the app, and errors it can tell apart with <code>errors.Is</code> and <code>errors.As</code></td></tr>
+      <tr><td class="wrap"><code>authlib</code>: results</td><td class="wrap"><code>UserInfo</code> (<code>ID</code>, <code>Email</code>, <code>Name</code>, <code>Language</code>, <code>Active</code>), <code>PermissionInfo</code>, <code>Object</code>, <code>Within</code> (from <code>Scopes</code>), <code>ErrNotFound</code>, <code>ErrForbidden</code>, <code>ErrInvalid</code>, <code>ErrProfile</code>, <code>FieldError</code></td><td>Values returned to the app, and errors it can tell apart with <code>errors.Is</code> and <code>errors.As</code></td></tr>
       <tr><td><code>muxauth</code></td><td><code>Authenticator</code></td><td>Kept apart so the root package doesn't depend on muxstack</td></tr>
       <tr><td><code>authtest</code></td><td class="wrap"><code>Reset</code>, <code>New</code>, <code>Principal</code>, <code>SignedIn</code></td><td>Apps' tests: empty the tables, build a fake, make a caller with given permissions. Allowed to use <code>internal/</code> because it lives in the same module</td></tr>
     </tbody>
   </table></div>
-  <p class="cap">About 30 names in the root package. Not exported: users' password hashes, role ids and role rows, sessions, refresh tokens, security events, the store's interface and every handler. Apps that need those today get them through the library's routes, not its types.</p>
+  <p class="cap">About 35 names in the root package. Not exported: users' password hashes, role ids and role rows, sessions, refresh tokens, security events, the store's interface and every handler. Apps that need those today get them through the library's routes, not its types.</p>
 
   <div class="file"><div class="name">PPE-next2: cmd/api wiring</div>
 <pre><code>auth, err := authlib.New(ctx, authlib.Config{
@@ -441,6 +534,7 @@ flowchart LR
 		BeforeDelete: refuseIfEmployeeHolds, <span class="c">// func(ctx, pgx.Tx, uuid.UUID) error: may veto</span>
 	}),
 	Request: requestInfo,                                <span class="c">// func(ctx) authlib.Request: request id, sign-in, app slug</span>
+	Ancestry: ancestry,                                  <span class="c">// func(ctx, authlib.Object) ([]authlib.Object, error): a project's client</span>
 	Secret:  cfg.JWTSecret,
 	Now:     clock.Now,
 })
@@ -476,20 +570,20 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
         <li><strong>HTTP</strong>: the routes' paths and JSON are public, since the apps' frontends call them. They stay PPE's in v1, are listed in <code>docs/http.md</code>, and are pinned by golden JSON tests.</li>
         <li><strong>Database</strong>: the tables are the library's own. Apps may reference <code>auth.users(id)</code> in foreign keys and read the view <code>auth.directory</code> (id, email, name, language, active), and nothing else. Changing either is a breaking change.</li>
         <li><strong>Profile</strong>: the file format is versioned (<code>version: 1</code>); an unknown field is refused.</li>
-        <li><strong>Audit events</strong>: their names (<code>user.*</code>, <code>role.*</code>) and snapshots are public, as apps keep them in their trails.</li>
+        <li><strong>Audit events</strong>: their names (<code>user.*</code>, <code>role.*</code>) and snapshots are public, grants and removals carrying their scope,, as apps keep them in their trails.</li>
       </ul>
     </div>
   </div>
-  <div class="note"><strong>Keeping it small.</strong> <code>api.txt</code> holds the exported API as <code>go doc -all</code> prints it. CI fails when the API changes and <code>api.txt</code> doesn't, so every change to the surface shows up in review. Before a release tag, <code>apidiff</code> against the previous tag decides the version: a breaking change needs a major version from v1 on. The library imports no app package; a test fails on any <code>remisb/ppe-*</code> or <code>baton</code> import.</div>
+  <div class="note"><strong>Keeping it small.</strong> <code>api.txt</code> holds the exported API as <code>go doc -all</code> prints it. CI fails when the API changes and <code>api.txt</code> doesn't, so every change to the surface shows up in review. Before a release tag, <code>apidiff</code> against the previous tag decides the version: a breaking change needs a major version from v1 on. The library imports no app package; a test fails on any <code>remisb/ppe-*</code> import.</div>
 </section>
 
 <section id="data">
-  <h2><span class="n">08</span>Database</h2>
+  <h2><span class="n">09</span>Database</h2>
   <div class="tbl"><table>
     <thead><tr><th>Level</th><th>When</th><th>Shape</th><th>Kept</th><th>Lost</th></tr></thead>
     <tbody>
       <tr><td><strong>L0</strong></td><td>Phase 1</td><td>The library on PPE's existing tables in <code>public</code></td><td>Everything</td><td>Nothing</td></tr>
-      <tr><td><strong>L1</strong></td><td>Phase 3, v1's target</td><td>Schema <code>auth</code> in the app's database: <code>users</code>, <code>user_sessions</code>, <code>roles</code>, <code>role_permissions</code>, <code>user_roles</code>, <code>auth_events</code></td><td>Foreign keys (<code>REFERENCES auth.users</code>), shared transactions, joins</td><td>Nothing</td></tr>
+      <tr><td><strong>L1</strong></td><td>Phase 3, v1's target</td><td>Schema <code>auth</code> in the app's database: <code>users</code>, <code>user_sessions</code>, <code>roles</code>, <code>role_permissions</code>, <code>role_assignments</code>, <code>auth_events</code></td><td>Foreign keys (<code>REFERENCES auth.users</code>), shared transactions, joins</td><td>Nothing</td></tr>
       <tr><td><strong>L2</strong></td><td>Later, when an app needs it</td><td>A separate database. The app keeps a <code>users</code> mirror (id, email, name, active, language) updated after commit and from a change feed</td><td>Foreign keys to the mirror</td><td>Audit in the same transaction (a feed instead) and joins into the security log</td></tr>
       <tr><td><strong>L3</strong></td><td>auth-proto</td><td>The store behind HTTP, same ports</td><td>App code</td><td>Needs the service running</td></tr>
     </tbody>
@@ -498,14 +592,15 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
     <li><strong>Migrations</strong>: the library embeds its own, with its own version table <code>auth.schema_migrations</code>, run by <code>api -migrate-auth</code> before the app's. PPE's <code>make migrate</code>, <code>deploy/migrate.sh</code> and <code>/ready</code> call it.</li>
     <li><strong>Moving into <code>auth</code></strong>: the first library migration is a baseline. When <code>public.users</code> exists, it moves the six tables with <code>ALTER TABLE … SET SCHEMA</code>, which keeps every foreign key, index, trigger and row. On an empty database it creates them.</li>
     <li><strong>Grants</strong>: the library ships <code>grants.sql</code> for its schema, taking the app's role name (<code>ppe_app</code>) as a parameter. Append-only <code>auth_events</code> and its purge function move with it.</li>
+    <li><strong>Assignments</strong>: <code>role_assignments(user_id, role_id, object_type, object_id, granted_by, granted_at, expires_at)</code> replaces <code>user_roles</code>, one row per user, role and scope (a unique index over the scope with empty values for global), with an index on <code>(object_type, object_id)</code> for <code>Forget</code>. <code>users.access_version</code> moves with every change. P2's migration, still one of PPE's at L0, turns each <code>user_roles</code> row into a global assignment.</li>
     <li><strong>Public objects</strong>: apps may reference <code>auth.users(id)</code> in foreign keys and read the view <code>auth.directory</code>; every other table, column and function is the library's own and may change in any release. PPE's 15 Go files that join <code>users</code> for names read <code>auth.directory</code> instead.</li>
     <li><strong>Tests</strong>: <code>authtest.Reset(tx)</code> empties the library's tables and syncs built-ins again, replacing <code>TRUNCATE users CASCADE</code> plus <code>role.EnsureBuiltins</code>.</li>
-    <li><strong>SQLite</strong> (v2, for Baton): <code>internal/store/sqlite</code>, chosen with <code>authlib.SQLite(db, …)</code>, on <code>modernc.org/sqlite</code>, ported from Baton's approach (WAL, <code>BEGIN IMMEDIATE</code> for <code>FOR UPDATE</code> and the advisory lock, UTC text times, paired migration folders), with one contract test run on both stores. It applies at L2, or to an app that is entirely on SQLite.</li>
+    <li><strong>SQLite</strong> (later, an option): <code>internal/store/sqlite</code>, chosen with <code>authlib.SQLite(db, …)</code>, on <code>modernc.org/sqlite</code> (pure Go: WAL, <code>BEGIN IMMEDIATE</code> for <code>FOR UPDATE</code> and the advisory lock, UTC text times, paired migration folders), with one contract test run on both stores. It applies at L2, or to an app that is entirely on SQLite.</li>
   </ul>
 </section>
 
 <section id="moves">
-  <h2><span class="n">09</span>What moves</h2>
+  <h2><span class="n">10</span>What moves</h2>
   <div class="grid2">
     <div class="card">
       <h3>Out of PPE-next2</h3>
@@ -531,7 +626,7 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
       <ul>
         <li>The permission keys and modules, and every check on a route.</li>
         <li>The audit trail and its seals.</li>
-        <li>Anything finer than a role: which employee a user is, Baton's project roles (until v2).</li>
+        <li>The objects themselves and their parents (answered through <code>Ancestry</code>), ownership rules and field visibility (see <a href="#objects">Object scopes</a>), and which employee a user is.</li>
         <li>Screens: Sign in, Account, Users, Roles &amp; permissions, Security (see <a href="#web">Frontend</a>).</li>
       </ul>
     </div>
@@ -539,33 +634,34 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
 </section>
 
 <section id="web">
-  <h2><span class="n">10</span>Frontend</h2>
+  <h2><span class="n">11</span>Frontend</h2>
   <ul>
     <li><strong>v1 changes no screen.</strong> The routes keep their paths and JSON, so <code>@ppe/app-shell</code>'s sign-in, Confirm your password and session code, and Administration's Users, Roles &amp; permissions and Security, work as they are.</li>
     <li>Roles &amp; permissions marks built-in roles read-only (decision 4) and groups permissions by module, from <code>GET /api/v1/roles/catalogue</code>.</li>
+    <li>Users shows each grant with its scope; the screen asks the app for the object's name. A scope picker appears only once a module declares object types (Crew in P4).</li>
     <li><code>@ppe/api-client</code>'s <code>permissions.ts</code> stays hand-written. The Go test that compares it now reads the catalogue built from the modules.</li>
-    <li>Later: <code>@remisb/auth-react</code> with Sign in, Confirm your password, Account and the Users and Roles screens, for Crew and Baton to share. Labels stay in each app's dictionaries, by key.</li>
+    <li>Later: <code>@remisb/auth-react</code> with Sign in, Confirm your password, Account and the Users and Roles screens, for the apps to share. Labels stay in each app's dictionaries, by key.</li>
   </ul>
 </section>
 
 <section id="phases">
-  <h2><span class="n">11</span>Delivery phases</h2>
+  <h2><span class="n">12</span>Delivery phases</h2>
   <div class="tbl"><table class="phase">
     <thead><tr><th>Phase</th><th>Scope</th><th>Done when</th></tr></thead>
     <tbody>
       <tr><td>P0 Repository</td><td><code>remis-libs/auth-lib</code>: module, CI with Postgres, CLAUDE.md, an ADR on modules and client profiles, the profile format and its check</td><td>CI green; the check refuses a set of bad profiles, each with its message</td></tr>
       <tr><td>P1 Extract as-is</td><td>The four packages and the <code>cmd/api</code> auth files moved into <code>internal/</code> with their tests; the public surface (<code>api.txt</code>) with <code>Record</code>, <code>BeforeDelete</code> and <code>Request</code>; the store on PPE's existing tables (L0). PPE switches with no change in behaviour.</td><td>PPE's Go tests, <code>TestRoutePolicy</code>, <code>TestSeededRolesKeepPolicy</code> and e2e pass unchanged; the old packages are deleted</td></tr>
-      <tr><td>P2 Modules and profile</td><td>PPE's keys into <code>internal/perm</code> modules; <code>role.*</code> → <code>perm.*</code>; production's current built-in sets read and written into <code>gavort/access.yaml</code>; built-ins synced and locked; <code>-check-access</code> in CI; session settings read from the profile</td><td>A golden test shows the profile yields exactly production's role → permission sets; a new permission ships with no migration</td></tr>
+      <tr><td>P2 Modules and profile</td><td>PPE's keys into <code>internal/perm</code> modules; <code>role.*</code> → <code>perm.*</code>; production's current built-in sets read and written into <code>gavort/access.yaml</code>; built-ins synced and locked; <code>role_assignments</code> with scopes (every existing holding global), <code>Can</code>, <code>Scopes</code>, <code>Forget</code> and <code>Ancestry</code>; <code>-check-access</code> in CI; session settings read from the profile</td><td>A golden test shows the profile yields exactly production's role → permission sets; a new permission ships with no migration; the object-scope tests pass and PPE behaves as before</td></tr>
       <tr><td>P3 Own schema (L1)</td><td>Embedded migrations with the baseline move to <code>auth</code>; grants; <code>-migrate-auth</code> in <code>make migrate</code>, <code>deploy/migrate.sh</code> and <code>/ready</code>; <code>authtest.Reset</code></td><td>Up, down, up in CI; a restored production backup migrates with every foreign key intact</td></tr>
-      <tr><td>P4 Crew</td><td>(a) Crew drops <code>iam</code> for the library with its own profile; (b) when its contexts move into PPE's binary (ADR 0001), its modules and roles join Gavort's profile and its role assignments are imported</td><td>(a) Crew's tests pass with <code>iam</code> deleted; (b) a Crew planner signs in to PPE's binary with Crew's permissions</td></tr>
-      <tr><td>P5 v2 for Baton</td><td>SQLite store and contract tests, roles per resource scope (Baton's projects), API tokens and invitations (from Baton), a <code>Mailer</code> option; a <code>remisb</code> profile</td><td>The contract test passes on both stores; Baton's identity packages are deleted</td></tr>
+      <tr><td>P4 Crew</td><td>(a) Crew drops <code>iam</code> for the library with its own profile, and declares <code>client</code> → <code>project</code> with its first scoped roles (<code>client-planner</code>, <code>site-coordinator</code>) and <code>Ancestry</code>; (b) when its contexts move into PPE's binary (ADR 0001), its modules and roles join Gavort's profile and its role assignments are imported</td><td>(a) Crew's tests pass with <code>iam</code> deleted, and a client planner sees and changes only that client's projects; (b) a Crew planner signs in to PPE's binary with Crew's permissions</td></tr>
+      <tr><td>P5 Later options</td><td>SQLite store and contract tests; API tokens and invitations with a <code>Mailer</code> option; another client's profile, when one is needed</td><td>The contract test passes on both stores</td></tr>
       <tr><td>P6 Later</td><td>L2 (separate database with the mirror and change feed); token format per the guidelines (server sessions) or EdDSA; auth-proto on top</td><td>Its own plan, in auth-proto</td></tr>
     </tbody>
   </table></div>
 </section>
 
 <section id="testing">
-  <h2><span class="n">12</span>Testing</h2>
+  <h2><span class="n">13</span>Testing</h2>
   <div class="grid2">
     <div class="card">
       <h3>In the library</h3>
@@ -574,6 +670,7 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
         <li>Store tests on real Postgres, in their own database, in parallel, independent of any app's test lock.</li>
         <li>Profile checks: table tests of good and bad profiles and modules.</li>
         <li>Built-in sync: adds, removes, keeps dormant, writes one event per change, is a no-op the second time.</li>
+        <li>Object scopes: table tests of <code>Can</code> (global, the object, an ancestor, another branch, another type, expired, a dormant key); a property test that filtering by <code>Scopes</code> keeps exactly the objects <code>Can</code> allows; containment per scope; <code>assignable_on</code> in the start-up check; a grant's removal seen on the next request; <code>Forget</code>.</li>
         <li>Migrations: the baseline on an empty database and on a copy of PPE's tables.</li>
         <li>Import boundaries: no app package; no <code>net/http</code> outside <code>internal/httpapi</code>, the root package's <code>Middleware</code> and <code>muxauth</code>.</li>
         <li>The public surface: <code>api.txt</code> matches <code>go doc -all</code>; no exported signature names an <code>internal</code> type; every exported name has an example.</li>
@@ -588,30 +685,35 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
         <li>A golden test: <code>gavort/access.yaml</code> gives the role → permission sets recorded from production.</li>
         <li><code>permissions.ts</code> against the catalogue, as today.</li>
         <li>e2e unchanged; its global setup seeds through the library.</li>
+        <li>Crew: for each scoped role, its lists and checks stay inside the scope.</li>
       </ul>
     </div>
   </div>
 </section>
 
 <section id="risks">
-  <h2><span class="n">13</span>Risks</h2>
+  <h2><span class="n">14</span>Risks</h2>
   <div class="tbl"><table>
     <thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
     <tbody>
       <tr><td>A bad profile stops the API at deploy</td><td><code>-check-access</code> in CI on the same binary; <code>prod-up</code> waits for <code>/ready</code> before replacing Caddy, so the old API keeps serving</td></tr>
       <tr><td>Locking built-ins drops an edit made in production</td><td>P2 copies production's sets first and the golden test proves equality; a profile may still mark a built-in <code>seeded</code> (created once, then editable) for a client who wants that</td></tr>
-      <tr><td>The library grows to fit three apps' differences</td><td>A small core; API tokens, invitations and resource scopes as optional packages in v2; an app's quirks stay in the app through <code>BeforeDelete</code> and similar single-function options; new exports need a reason, and <code>api.txt</code> shows every one in review</td></tr>
+      <tr><td>The library grows to fit every app's differences</td><td>A small core; API tokens and invitations as optional packages later; an app's quirks stay in the app through <code>BeforeDelete</code> and similar single-function options; new exports need a reason, and <code>api.txt</code> shows every one in review</td></tr>
       <tr><td>Changes spanning library and app need two releases</td><td><code>go.work</code> locally; tagged versions; the library's CI runs PPE's auth tests against the change before tagging</td></tr>
       <tr><td>Another private module in the image builds</td><td>The same <code>.github-token</code> secret as dbbackup and pdf-mini, with read access added; or make the repository public, as it holds no secrets</td></tr>
+      <tr><td>Lists slow down with many scoped grants</td><td><code>Scopes</code> returns ids per type, cached per user and version; if one user ever holds thousands, a public view of a user's scopes lets the app join in SQL instead</td></tr>
+      <tr><td>A wrong <code>Ancestry</code> grants too much or too little</td><td>Each app tests its <code>Ancestry</code> against its data; the library refuses a parent of the wrong type and stops at a depth limit</td></tr>
       <tr><td>The schema move on a live database</td><td>One transaction, rehearsed on a restored backup (<code>make prod-drill</code>); the down migration moves the tables back</td></tr>
     </tbody>
   </table></div>
 </section>
 
 <section id="excluded">
-  <h2><span class="n">14</span>Not in v1</h2>
+  <h2><span class="n">15</span>Not in v1</h2>
   <ul>
-    <li>SQLite, roles per project or other resource, API tokens, invitations, email sign-in codes (v2, with Baton).</li>
+    <li>SQLite, API tokens, invitations, email sign-in codes (later).</li>
+    <li>Relation-based rules (ownership) and conditions on values (see <a href="#objects">Object scopes</a>).</li>
+    <li>Groups or teams holding roles.</li>
     <li>A separate auth database and the users mirror (L2).</li>
     <li>A new token format: v1 keeps PPE's HS256 access tokens and refresh cookie as they are.</li>
     <li>Shared React screens (<code>@remisb/auth-react</code>).</li>
@@ -620,11 +722,13 @@ rt.restricted(<span class="s">"DELETE /api/v1/orders/{id}"</span>, h.delete, per
 </section>
 
 <section id="open">
-  <h2><span class="n">15</span>Open questions</h2>
+  <h2><span class="n">16</span>Open questions</h2>
   <ul>
     <li><strong>Profile format.</strong> YAML is easy to read and review; JSON needs no parser dependency. YAML is proposed, through a small, strict decoder that refuses unknown fields.</li>
     <li><strong>Crew's merge timing.</strong> P4(b) waits for Crew's contexts to move into PPE's binary. Until then Crew runs the library with its own profile.</li>
     <li><strong>Public or private repository.</strong> Public removes a build secret; private matches dbbackup and pdf-mini.</li>
+    <li><strong>Groups.</strong> Should a team hold assignments, so granting a client's planners is one row? Not in v1; the assignment's holder can become a user or a group later.</li>
+    <li><strong>Object names on Users.</strong> One endpoint per object type in the app, or a <code>Describe</code> function the library calls? To settle in P4 with Crew's screen.</li>
     <li><strong>Server sessions.</strong> The guidelines prefer opaque server sessions to JWTs. The library is where that change would be made once for every app. Which phase should it be?</li>
   </ul>
 </section>
